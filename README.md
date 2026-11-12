@@ -117,3 +117,8 @@ packages that matter. That trace is what isolated every trap above.
 * Thumbnails and originals are cached under the app's `cache/immich/` directory.
 * Downloads happen off the main thread even when the caller is a UI component.
 * No release/publishing setup: this builds locally only.
+
+## License
+
+Released into the public domain under [The Unlicense](LICENSE) — do whatever you
+like with it, with no warranty.
