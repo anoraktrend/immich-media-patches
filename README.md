@@ -118,6 +118,13 @@ packages that matter. That trace is what isolated every trap above.
 * Downloads happen off the main thread even when the caller is a UI component.
 * No release/publishing setup: this builds locally only.
 
+## Next version
+
+[`docs/v2-orchestrator.md`](docs/v2-orchestrator.md) plans turning the Immich mobile app
+into the orchestrator: it lends its own session credentials to the patched pickers
+(auto-discovery, no rebuild per user) and becomes the only component that talks to the
+server. Includes the verified credential facts, the security model, and the phase plan.
+
 ## License
 
 Released into the public domain under [The Unlicense](LICENSE) — do whatever you
