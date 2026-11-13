@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # Convenience wrapper: ./patch.sh discord|tumblr <input.apk> [output.apk]
+#
+# Signing: when KEYSTORE_PATH is set in .env, patched APKs are signed with the
+# project keystore — the same key signs the custom Immich build, which is what
+# makes the bridge's signature-level permission grant. Without it, Morphe's
+# built-in signer is used (v1 behaviour).
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -25,10 +30,21 @@ output="${3:-$ROOT/build/$target-immich.apk}"
 
 [ -f "$BUNDLE" ] || "$ROOT/build.sh"
 
+KEYSTORE_ARGS=()
+if [ -n "${KEYSTORE_PATH:-}" ] && [ -f "$KEYSTORE_PATH" ]; then
+    KEYSTORE_ARGS+=(--keystore "$KEYSTORE_PATH")
+    [ -n "${KEYSTORE_ALIAS:-}" ] && KEYSTORE_ARGS+=(--keystore-entry-alias "$KEYSTORE_ALIAS")
+    if [ -n "${KEYSTORE_PASSWORD:-}" ]; then
+        KEYSTORE_ARGS+=(--keystore-password "$KEYSTORE_PASSWORD" --keystore-entry-password "$KEYSTORE_PASSWORD")
+    fi
+    echo "signing with: $KEYSTORE_PATH"
+fi
+
 java -Djava.awt.headless=true -jar "$MORPHE_JAR" patch \
     -p "$BUNDLE" \
     -e "$patch_name" \
     -O "immichBaseUrl=$IMMICH_URL" \
     -O "immichApiKey=$IMMICH_API_KEY" \
+    "${KEYSTORE_ARGS[@]}" \
     -o "$output" \
     "$input"

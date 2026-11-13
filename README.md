@@ -42,6 +42,7 @@ patched `AndroidManifest.xml` as `<meta-data>` and read back by the provider.
 
 ```
 build.sh                     builds build/immich-media-patches.mpp
+build-immich.sh              builds the custom Immich APK (the orchestrator) from source
 patches/src/main/kotlin/     Morphe patch module (Kotlin)
 extension/src/main/java/     runtime injected into the APK (Java, dexed to extensions/*.mpe)
 ```
@@ -124,9 +125,10 @@ packages that matter. That trace is what isolated every trap above.
 (**built from source**) into the orchestrator: it lends its own session credentials to the
 patched pickers (auto-discovery, no rebuild per user), serves the **full gallery** —
 device-local and server assets interleaved exactly as the Immich app's own timeline shows
-them — and becomes the only component that talks to the server. The doc carries the
-verified merge SQL, the build recipe, the signature-permission security model, and the
-phase plan.
+them — and becomes the only component that talks to the server. The Immich modifications are
+developed as a fork (`anoraktrend/immich-android-bridge`, branch `android-bridge`), so the
+AGPL app and its changes ship together. The doc carries the verified merge SQL, the build
+recipe, the signature-permission security model, and the phase plan.
 
 ## License
 

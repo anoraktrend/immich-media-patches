@@ -97,8 +97,10 @@ Tag `v3.4.1` pins (all now installed on this machine):
   `mobile native i18n open-api .mise .github`. `.mise` is mandatory (dependency
   sidecars) — without it npm-tool installs fail with "run `mise lock`". Monorepo warnings
   about config roots that are not checked out are benign.
-- **CI's canonical steps** (`.github/workflows/build-mobile.yml`), reproducible locally:
+- **CI's canonical steps** (`.github/workflows/build-mobile.yml`):
   `mise //mobile:install:ci` → `mise //mobile:codegen` → `flutter build apk --release`.
+  Locally the umbrella `codegen` task needs the workarounds recorded under "Operational
+  notes" — use `./build-immich.sh`, which encodes the verified order.
 - The Dart OpenAPI client is generated from the **checked-in spec**
   (`open-api/immich-openapi-specs.json`); no server build involved.
 - **Native core:** `native/native_core/hook/build.dart` (via `native_toolchain_rust`)
@@ -115,11 +117,29 @@ Tag `v3.4.1` pins (all now installed on this machine):
   on the device carry its certificate (SHA-256 `6B:9B:2A:1A:C3:92:91:AA:…`).
 - The patcher accepts explicit material: `--keystore`, `--keystore-entry-alias`,
   `--keystore-entry-password`, `--keystore-password`.
-- **v2 plan:** one project-owned keystore signs **both** the custom Immich build (Gradle)
-  and the patched consumers (via those flags). The `signature`-level permission then
-  grants between exactly these apps, nothing else. v1 consumers get re-patched anyway for
-  v2, so switching keys costs nothing extra. Losing the keystore costs an
-  uninstall/restore cycle on every app — keep a copy off-repo.
+- **v2 plan (implemented):** one project-owned keystore signs **both** the custom Immich
+  build (Gradle, via `key.properties` written by `build-immich.sh`) and the patched
+  consumers (via those flags in `patch.sh`). The `signature`-level permission then grants
+  between exactly these apps, nothing else. v1 consumers get re-patched anyway for v2, so
+  switching keys costs nothing extra.
+- The keystore exists: `~/.config/immich-bridge/immich-bridge.keystore` (PKCS12, alias
+  `immich-bridge`, 4096-bit RSA); its password is in the gitignored `.env`
+  (`KEYSTORE_PATH` / `KEYSTORE_ALIAS` / `KEYSTORE_PASSWORD`). Losing it costs an
+  uninstall/restore cycle on every app — keep a backup copy.
+
+## Where the Immich modifications live (the fork)
+
+The modifications are kept as a **fork**: `anoraktrend/immich-android-bridge` (a true
+GitHub fork of `immich-app/immich`, public like upstream) with a working branch
+**`android-bridge`** cut from release tag `v3.4.1`.
+
+- `origin` = the fork, `upstream` = `immich-app/immich` (blob-filtered) for rebases.
+- Upgrades: fetch the new release tag from `upstream`, rebase `android-bridge`, re-copy
+  `merged_asset.drift` and diff it, rebuild.
+- The local checkout `/home/lucy/media/Android/immich-app` is a sparse copy of the same
+  repo and doubles as the build tree.
+- Licensing falls out of the fork: the modified app stays AGPL-3.0 with its source, and
+  nothing AGPL needs to live in this Unlicense repository.
 
 ## Architecture
 
@@ -164,10 +184,11 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 
 ## Work plan
 
-- **Phase 0 — host, toolchain, data source: done.** Manifest/host mapped, Kotlin seams
-  located, merge query identified and executed against the device DB, toolchain installed,
-  CI recipe reproduced in the operational notes. Remaining: **run the unmodified baseline
-  build** end to end (install:ci → codegen → APK) to prove the pipeline before adding code.
+- **Phase 0 — host, toolchain, data source, baseline build: done (2026-11-13).**
+  Manifest/host mapped, Kotlin seams located, the merge query executed against the device
+  DB, toolchain installed, fork established, and the unmodified baseline built end to end
+  (arm64 release APK, 102.7 MB, debug-signed). The caveats that cost a few cycles are
+  recorded under "Build from source".
 - **Phase 1 — bridge skeleton.** New Kotlin package (e.g.
   `mobile/android/app/src/main/kotlin/app/alextran/immich/bridge/`), provider + permission
   in the manifest, read-only provider.
@@ -185,21 +206,46 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 
 ## Operational notes
 
-- **Checkout:** `/home/lucy/media/Android/immich-app` — sparse clone of tag `v3.4.1`
-  (`mobile native i18n open-api .mise .github`, ~113 MB).
+- **Checkout:** `/home/lucy/media/Android/immich-app` — sparse clone of the fork
+  (`origin` = `anoraktrend/immich-android-bridge`, `upstream` = `immich-app/immich`),
+  currently on branch `android-bridge` at tag `v3.4.1`. Sparse paths:
+  `mobile native i18n open-api .mise .github` (~113 MB).
 - **Build (each time):**
+
+  `./build-immich.sh` is the verified path; it runs exactly this:
 
   ```bash
   cd /home/lucy/media/Android/immich-app
   export PATH="$HOME/fvm/versions/3.47.2/bin:$PATH"
   export ANDROID_HOME=/opt/android-sdk
-  mise //mobile:install:ci      # dart client from open-api/ + pub get --enforce-lockfile
-  mise //mobile:codegen         # build_runner, drift, pigeon, i18n, native bindings
+  export JAVA_HOME=/usr/lib/jvm/java-21-openjdk
+  mise //mobile:install:ci            # dart client from open-api/ + pub get --enforce-lockfile
+  mise //mobile:codegen:native        # cargo + ffigen (see caveats)
+  mise //mobile:codegen:dart          # build_runner (301 outputs)
+  mise //mobile:codegen:drift:migration
+  mise //mobile:codegen:pigeon
+  mise //mobile:i18n:loader && mise //mobile:i18n:keys
   cd mobile && flutter build apk --release --target-platform android-arm64
-  # -> mobile/build/app/outputs/flutter-apk/app-release.apk
+  # -> mobile/build/app/outputs/flutter-apk/app-release.apk (102.7 MB baseline)
   ```
 
   Arm64 only: the device is arm64 (CI additionally builds universal + split-per-abi).
+
+  Caveats recorded from the first successful build (2026-11-13):
+
+  - The umbrella `mise //mobile:codegen` aborts: `codegen:native` needs the ffigen
+    workaround below, and `codegen:translation` pulls `//:i18n:format-fix`
+    (`pnpm format:fix`), which needs the pnpm workspace — not installed. The individual
+    task order above is the working sequence.
+  - ffigen fails with `'stdarg.h' file not found` unless `native/native_core/ffigen.yaml`
+    gains `compiler-opts: -resource-dir=/usr/lib/clang/23 -I/usr/lib/clang/23/include`.
+    `build-immich.sh` appends it, runs the task, then restores the file.
+  - Gradle needs `build-tools;35.0.0` and `platforms;android-33/34/35`; `/opt/android-sdk`
+    was chowned to the build user so Gradle can install components itself.
+  - `i18n:keys` must complete, or every `context.t.*` getter is missing and kernel
+    compilation fails.
+  - Signing: `build-immich.sh` writes `mobile/android/key.properties` from `.env`;
+    without it the release build silently falls back to debug signing.
 - **Replacing the device's Immich app** (custom build keeps `applicationId
   app.alextran.immich` but has a different signer): back up
   `/data/data/app.alextran.immich` and `/data/user_de/0/app.alextran.immich` **before
@@ -221,11 +267,10 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 
 ## Licensing
 
-Immich mobile is **AGPL-3.0**; the bridge modifications are a derivative work. If a built
-Immich APK is ever distributed, the modified source must be available with it. Plan: keep
-the bridge sources in one clearly-licensed place — e.g. an `immich-bridge/` directory with
-its own AGPL-3.0 `LICENSE` and a note in the root — while this repo's own patch code stays
-The Unlicense. Personal builds carry no obligation, but the layout should not rely on that.
+Immich mobile is **AGPL-3.0**, and the fork (`anoraktrend/immich-android-bridge`) carries
+that license with its source — so if the custom APK is ever distributed, the
+corresponding source is already published. This repository (the Morphe patches and the
+provider extension) stays **The Unlicense**; no AGPL code is copied into it.
 
 ## Relationship to `immich-cloud-media`
 
