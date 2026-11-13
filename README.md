@@ -131,6 +131,12 @@ developed as a fork (`anoraktrend/immich-android-bridge`, branch `android-bridge
 AGPL app and its changes ship together. The doc carries the verified merge SQL, the build
 recipe, the signature-permission security model, and the phase plan.
 
+**Status (2026-11-13):** the bridge is implemented and both surfaces are verified on
+device — the Immich build serves `config` / `timeline` / `size` / media, and re-patched
+Discord and Tumblr list and fetch through it (byte-identical to the probe), with the
+baked meta-data retained as the fallback. Remaining: the in-picker settings entry and
+the UI send tests.
+
 ## License
 
 Released into the public domain under [The Unlicense](LICENSE) — do whatever you
