@@ -175,29 +175,63 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 - Degradation: if the database cannot be read (e.g. first launch before migration), serve
   the remote-only timeline and say so; logout of Immich disables the bridge naturally.
 
-### Bridge verification (2026-11-13, first working build)
+### Bridge verification (2026-11-13, Phase 3 complete)
 
-- The bridge skeleton + `config` endpoint are **verified on device**: provider registered,
-  permission declared, and a call returns `{protocol=1, configured=true, serverUrl=…,
-  sessionKey=…}` (token masked in every log). Read from `HomeWidgetPreferences` per call.
-- Install notes for replacing the stock app (all verified):
-  - `pm uninstall -k` is a trap — kept data remembers the old signature and the next
-    install of a differently-signed build fails `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
-    Full `pm uninstall` is required; restore the data from a tar afterwards.
-  - The stock build's versionCode (3042099) is *higher* than the v3.4.1 tag's
-    (3040199), so install with `adb install -d` (allow downgrade).
-  - The uid changes on reinstall (10243 → 10248 here): `chown -R <new-uid>` both
-    `/data/data/<pkg>` and `/data/user_de/0/<pkg>`, then `chcon -R
-    u:object_r:app_data_file:s0:c<uid-10000>,c256,c512,c768`.
-  - Data (prefs incl. the live login, `app_flutter/immich.sqlite`) survives the tar
-    round trip; the app starts normally on the restored state.
-- Caller checks observed: root and shell can call the provider on this ROM (KernelSU
-  runs `su` in its own SELinux domain; shell's uid checks are privileged). The case that
-  must be refused is a differently-signed *app* — the provider sets
-  `android:readPermission` (framework-enforced) and re-checks in `call()`. A direct
-  denial test needs the probe app (open item, Phase 3 tooling).
-- Frida 17.26.2 is back online (`frida-ps -U` lists device processes) — handy for the
-  media-endpoint work.
+Everything below is device-verified with `tools/bridge-probe` (trusted build) against
+the running app:
+
+- `config` → `{protocol=1, configured=true, serverUrl=…, sessionKey=…}` (masked in logs).
+- `timeline` → `available=true`, 20-row pages from the app's own `mergedAsset` SQL, in
+  the app's own order; remote and local rows share one code path.
+- `size` → remote via HEAD (probe: 587120 == streamed bytes; 75 == the test asset's
+  `_size`), local via MediaStore.
+- `openFile` → remote thumbnail 18730 B (WebP) and original streamed; local preview
+  842 B (loadThumbnail→JPEG) and original served as a MediaStore fd.
+- Denial: the differently-signed probe is refused with
+  `SecurityException: caller lacks app.alextran.immich.permission.BRIDGE` (see traps).
+- Dedup proof: a fresh test image pushed to DCIM appeared as a *remote* row within
+  minutes once the app's backup ran — exactly the merge SQL's local→remote handoff.
+
+Install-dance notes (stock → custom build, all verified):
+
+- `pm uninstall -k` is a trap: kept data remembers the old signature; the next install
+  of a differently-signed build fails `INSTALL_FAILED_UPDATE_INCOMPATIBLE`. Full
+  uninstall + tar restore is required.
+- The stock versionCode (3042099) is *higher* than the tag's (3040199): install with
+  `adb install -d` (allow downgrade).
+- The uid changes on reinstall (10243 → 10248 here): `chown -R <new-uid>` both
+  `/data/data/<pkg>` and `/data/user_de/0/<pkg>`, then `chcon -R
+  u:object_r:app_data_file:s0:c<uid-10000>,c256,c512,c768`.
+- **Runtime permissions do not survive a reinstall.** Android stores grants in system
+  state, not app data — after the restore the app had no media permissions, its device
+  sync found zero local assets, and its own local library view was empty. Re-grant:
+  `pm grant app.alextran.immich android.permission.{READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,READ_MEDIA_VISUAL_USER_SELECTED,READ_MEDIA_AUDIO,ACCESS_MEDIA_LOCATION}`
+  (or open the app UI and let it ask), then restart the app to re-sync.
+- Data (prefs incl. the live login, `app_flutter/immich.sqlite`) survives the tar round
+  trip.
+- Frida 17.26.2 is online (`frida-ps -U`) for deeper debugging.
+
+### Bridge traps found on device (2026-11-13)
+
+1. **Package visibility (`<queries>`).** A targetSdk 30+ consumer cannot reach the
+   bridge provider unless its manifest declares
+   `<queries><provider android:authorities="app.alextran.immich.bridge"/></queries>`.
+   The failure is `IllegalArgumentException: Unknown authority …` — indistinguishable
+   from a missing provider — and shell/root tests *cannot* reproduce it (they are
+   privileged). **The consumer patches must add the queries element.**
+2. **Platform SQLite cannot parse the drift schema.** The database uses
+   `WITHOUT ROWID, STRICT` (SQLite 3.37+); Android 13's platform SQLite (3.32) refuses
+   every open with `malformed database schema`. The bridge reads through requery's
+   sqlite-android (JitPack `com.github.requery:sqlite-android:3.49.0`) — a drop-in
+   `SQLiteDatabase` with a modern engine.
+3. **AMS does not gate `call()` on the provider's `readPermission`** on this ROM: the
+   in-provider `checkCallingPermission` is what actually refuses `call()` — keep it.
+4. **Row-returning PRAGMAs cannot use `execSQL`** (`PRAGMA busy_timeout` →
+   "Queries can be performed using SQLiteDatabase query or rawQuery methods only") —
+   use `rawQuery`.
+5. **The app's SQL uses literals for remote-only columns** (`0 as playback_style`);
+   transcribing `rae.playback_style` fails at prepare time. Re-copy the SQL verbatim
+   from `merged_asset.drift` at every rebase.
 
 ## Config resolution order
 
@@ -217,10 +251,9 @@ Immich app (custom build)                     Discord / Tumblr (patched)
   signature permission in the manifest, read-only; `call("config")` verified on device.
 - **Phase 2 — config endpoint: done.** `ImmichAPI.getServerConfig` read per call;
   logged out → `configured=false`.
-- **Phase 3 — timeline and media.** `mergedAsset` SQL read-only against
-  `app_flutter/immich.sqlite`; remote via the app's HTTP stack (OkHttp + coroutines
-  already on the classpath); local via MediaStore (projection constants already exist in
-  `sync/MessagesImplBase.kt`).
+- **Phase 3 — timeline and media: done (2026-11-13).** Timeline from the app's own
+  `mergedAsset` SQL (requery SQLite), with size/thumb/original for remote and local
+  rows — all verified with the probe. See "Bridge verification" and "Bridge traps".
 - **Phase 4 — consumers.** Point the existing client upstream at the bridge (keep the
   meta-data fallback), settings Activity + synthetic album row (`Immich settings`),
   re-patch consumers with the project keystore.
@@ -283,6 +316,13 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 - **Pull the DB for local SQL iteration** (used for the evidence above):
   `app_flutter/immich.sqlite{,-wal,-shm}`; a copy lives at `/tmp/opencode/immich-db/`
   (ephemeral). Bind `:user_ids` with `(SELECT id FROM auth_user_entity)` for quick checks.
+- **Bridge probe** (`tools/bridge-probe/`): `./build-probe.sh` produces
+  `build/probe-trusted.apk` (project keystore) and `build/probe-untrusted.apk`
+  (persistent throwaway key, package `dev.immich.bridge.probe.untrusted`). Run:
+  `adb install -r build/probe-trusted.apk && adb shell am start -n
+  dev.immich.bridge.probe/dev.immich.bridge.probe.ProbeActivity` (optional
+  `-e localid <mediaStoreId>` for the local serve paths); read
+  `adb logcat -d -s ImmichBridgeProbe`.
 - **Device:** TCL T607DL, Android 13 (API 33), arm64, KernelSU root, ADB serial
   `NJZLI7DEB6SSWKEQ`. Wake before tests, screen off after.
 - **Patcher:** `MORPHE_JAR=~/Downloads/morphe-desktop-1.15.0-all.jar`; v2 `patch.sh` gets
@@ -328,9 +368,8 @@ which Immich endpoints and API-key permissions a cloud-media integration needs.
   (v3.3.5 → v3.4.1 happened during v1).
 - **Keystore hygiene**: one key for Immich + consumers, stored off-repo; loss = reinstall
   cycle everywhere.
-- **Probe app (Phase 3 tooling)**: a tiny bridge client built once, signed with the
-  project key for positive tests and with a throwaway key to *prove* the denial path —
-  shell/root on this ROM are privileged, so they cannot stand in for "an unsigned app".
+- **Bridge probe**: built — `tools/bridge-probe/` (trusted + untrusted variants; see
+  Operational notes). Run it after every bridge change, before touching consumers.
 - **App version pinning** (updated): upgrading = checkout new tag, re-apply the bridge
   patch, re-copy the SQL, rebuild, re-run the install dance.
 - **Gallery semantics worth knowing**: local-only rows are limited to assets in

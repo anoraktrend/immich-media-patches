@@ -43,6 +43,7 @@ patched `AndroidManifest.xml` as `<meta-data>` and read back by the provider.
 ```
 build.sh                     builds build/immich-media-patches.mpp
 build-immich.sh              builds the custom Immich APK (the orchestrator) from source
+tools/bridge-probe/          tiny APK exercising the v2 bridge (trusted + untrusted builds)
 patches/src/main/kotlin/     Morphe patch module (Kotlin)
 extension/src/main/java/     runtime injected into the APK (Java, dexed to extensions/*.mpe)
 ```
