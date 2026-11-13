@@ -265,11 +265,12 @@ Install-dance notes (stock → custom build, all verified):
 
 ## Config resolution order
 
-1. In-app settings (Phase 4): server URL + token, "Test connection" hitting
-   `/server/about`, stored in the consumer's `SharedPreferences`.
-2. Bridge provider — automatic when the Immich app is installed, patched and signed in.
-3. Patch-time `<meta-data>` — keeps personal builds working with neither of the above.
-
+1. **Bridge** — the Immich app is the configuration surface: its login owns the server
+   URL and the session, and it is where users configure Immich itself. Nothing needs
+   configuring in the pickers; the settings Activity was **removed from scope**
+   (2026-11-13) because the orchestrator made it redundant.
+2. **Patch-time `<meta-data>`** — the v1 fallback, still honoured: builds patched with
+   baked credentials keep working without the Immich app.
 ## Work plan
 
 - **Phase 0 — host, toolchain, data source, baseline build: done (2026-11-13).**
@@ -284,14 +285,15 @@ Install-dance notes (stock → custom build, all verified):
 - **Phase 3 — timeline and media: done (2026-11-13).** Timeline from the app's own
   `mergedAsset` SQL (requery SQLite), with size/thumb/original for remote and local
   rows — all verified with the probe. See "Bridge verification" and "Bridge traps".
-- **Phase 4 — consumers: bridge client done and verified (2026-11-13).** The extension
+- **Phase 4 — consumers: complete (2026-11-13).** The extension
   resolves bridge → baked meta-data; timeline, size, thumbnails, originals and staging
   all flow through the bridge; `<queries>` and the signature permission are added to the
   patched manifests; both apps are re-signed with the project keystore and installed
-  over restored data. Remaining: the settings Activity + synthetic album row
-  (`Immich settings`) for users without the Immich app. UI acceptance is complete on
-  both apps (Discord messages, Tumblr posts + messenger images).
-- **Phase 5 — polish.** Active source visible in settings; staged-file sweep (already in
+  over restored data. UI acceptance is complete on both apps (Discord messages, Tumblr
+  posts + messenger images). The settings Activity was **removed from scope** — the
+  orchestrator is the configuration surface (users log into the Immich app); baked
+  meta-data remains the fallback for builds without it.
+- **Phase 5 — polish.** Active source surfaced in logs (bridge vs direct); staged-file sweep (already in
   v1); document the bridge so other hosts can implement it; licence layout for the Immich
   modifications (below).
 

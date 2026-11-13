@@ -135,8 +135,8 @@ recipe, the signature-permission security model, and the phase plan.
 device — the Immich build serves `config` / `timeline` / `size` / media, and re-patched
 Discord and Tumblr list and fetch through it (byte-identical to the probe), with the
 baked meta-data retained as the fallback. UI acceptance is complete — Discord messages
-and Tumblr posts + messenger images on both apps. Remaining: the in-picker settings
-entry for users who do not run the Immich app.
+and Tumblr posts + messenger images on both apps. Configuration lives in the Immich app
+itself: the orchestrator removed the need for any settings UI in the pickers.
 
 ## License
 
