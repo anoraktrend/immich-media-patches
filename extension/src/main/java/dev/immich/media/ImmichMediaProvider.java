@@ -45,12 +45,16 @@ public final class ImmichMediaProvider extends ContentProvider {
         if (context == null) {
             return false;
         }
+        // Logging first: the configuration load below logs its mode decision, and
+        // that line is the single most useful debugging breadcrumb.
+        ImmichLog.init(context.getFilesDir());
         config = ImmichConfig.get(context);
         client = new ImmichClient(config);
         store = IdStore.get(context);
-        ImmichLog.init(context.getFilesDir());
         ImmichStage.sweep(context);
+        String mode = config.bridge() ? "bridge" : config.isConfigured() ? "direct" : "none";
         ImmichLog.d("provider ready, configured=" + config.isConfigured()
+                + " mode=" + mode
                 + " authority=" + config.authority);
         return true;
     }

@@ -233,6 +233,20 @@ Install-dance notes (stock → custom build, all verified):
   into the app cache, and `content read` returns 18730 / 587120 bytes for thumb and
   original — byte-identical to the probe. Bridge mode is logged as `config: bridge mode`
   in each app's `files/immich-debug.log`.
+- **Zero-option (credential-free) verification (2026-11-13):** patching from the
+  released `.mpp` with *no* options produces manifests with no baked meta-data at all
+  (bridge `<queries>` + permission intact). Device results:
+  - With the Immich app present: a cold picker process serves 1000-row pages through
+    the bridge, and an evicted original re-downloads through it byte-exactly.
+  - With the app **disabled** (`pm disable-user`): the picker returns empty and does
+    not crash; re-enabling restores it without touching the picker.
+  - `am force-stop` on the Immich app does **not** break anything — the event log
+    shows the process restarted on demand (`am_proc_start … content provider …
+    app.alextran.immich.bridge.BridgeProvider`) when a consumer resolves its config.
+  - The real failure modes are therefore: app absent, signed out, wrong signer, or
+    server unreachable.
+  - Since 2.0.1 the mode is logged at provider start
+    (`provider ready, configured=true mode=bridge …`).
 - **UI acceptance (2026-11-13):** Discord send **passed** — an image picked from the
   Immich album landed in a DM at 13:45. The log shows the whole chain: grid
   `thumb/<id>` (WebP) → `toOriginal` rewrite → bridge original → `_size` via the bridge

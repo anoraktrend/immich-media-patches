@@ -19,7 +19,7 @@ patch, or point Morphe at this repository and it fetches the newest release itse
 
 ```bash
 java -jar morphe-desktop-*.jar patch \
-  -p patches-2.0.0.mpp \
+  -p patches-<version>.mpp \
   -e "Immich photo picker" \
   -o out/app.apk \
   app.apk
