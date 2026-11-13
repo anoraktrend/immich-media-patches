@@ -237,8 +237,9 @@ Install-dance notes (stock → custom build, all verified):
   Immich album landed in a DM at 13:45. The log shows the whole chain: grid
   `thumb/<id>` (WebP) → `toOriginal` rewrite → bridge original → `_size` via the bridge
   → `_data` staged as `cache/immich/staged/r_<uuid>-…` → upload reads → delivered.
-  Tumblr's composer ran the same paths across a batch of assets at 13:49–13:51 (staging,
-  sizes, originals); the published post still needs its own confirmation.
+  Tumblr **passed too** — photo posts and messenger images published from the Immich
+  album (composer ran the same bridge paths across a batch of assets at 13:49–13:51,
+  confirmed by the posts landing). **Consumer UI acceptance: complete on both apps.**
 
 ### Bridge traps found on device (2026-11-13)
 
@@ -288,8 +289,8 @@ Install-dance notes (stock → custom build, all verified):
   all flow through the bridge; `<queries>` and the signature permission are added to the
   patched manifests; both apps are re-signed with the project keystore and installed
   over restored data. Remaining: the settings Activity + synthetic album row
-  (`Immich settings`) for users without the Immich app; Discord's send test passed,
-  Tumblr's post confirmation is pending.
+  (`Immich settings`) for users without the Immich app. UI acceptance is complete on
+  both apps (Discord messages, Tumblr posts + messenger images).
 - **Phase 5 — polish.** Active source visible in settings; staged-file sweep (already in
   v1); document the bridge so other hosts can implement it; licence layout for the Immich
   modifications (below).

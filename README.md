@@ -134,8 +134,9 @@ recipe, the signature-permission security model, and the phase plan.
 **Status (2026-11-13):** the bridge is implemented and both surfaces are verified on
 device — the Immich build serves `config` / `timeline` / `size` / media, and re-patched
 Discord and Tumblr list and fetch through it (byte-identical to the probe), with the
-baked meta-data retained as the fallback. Discord's send test passed on device;
-remaining: the in-picker settings entry and Tumblr's post confirmation.
+baked meta-data retained as the fallback. UI acceptance is complete — Discord messages
+and Tumblr posts + messenger images on both apps. Remaining: the in-picker settings
+entry for users who do not run the Immich app.
 
 ## License
 
