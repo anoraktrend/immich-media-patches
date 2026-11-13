@@ -121,9 +121,12 @@ packages that matter. That trace is what isolated every trap above.
 ## Next version
 
 [`docs/v2-orchestrator.md`](docs/v2-orchestrator.md) plans turning the Immich mobile app
-into the orchestrator: it lends its own session credentials to the patched pickers
-(auto-discovery, no rebuild per user) and becomes the only component that talks to the
-server. Includes the verified credential facts, the security model, and the phase plan.
+(**built from source**) into the orchestrator: it lends its own session credentials to the
+patched pickers (auto-discovery, no rebuild per user), serves the **full gallery** —
+device-local and server assets interleaved exactly as the Immich app's own timeline shows
+them — and becomes the only component that talks to the server. The doc carries the
+verified merge SQL, the build recipe, the signature-permission security model, and the
+phase plan.
 
 ## License
 

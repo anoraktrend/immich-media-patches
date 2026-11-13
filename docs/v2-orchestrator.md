@@ -1,7 +1,7 @@
 # v2 — the Immich app as orchestrator
 
 Design and work plan for the next version. v1 is shipped and verified; see the
-[README](../README.md) for the current design, the per-app seam list and the trap table.
+[README](../README.md) for it, including the trap table.
 
 ## Status of v1 (shipped)
 
@@ -10,189 +10,265 @@ Design and work plan for the next version. v1 is shipped and verified; see the
 | `com.discord` 351.11 | Immich timeline | thumbnails (~13 KB/cell) | message, full-resolution original |
 | `com.tumblr` 47.0.0.108 | Immich timeline | renders in composer | photo post + messenger image |
 
-Config is baked into each APK at patch time (`immich.baseUrl` / `immich.apiKey` as
-manifest `<meta-data>`). Every patched app carries credentials and its own HTTP client.
+Config is baked into each APK at patch time (`immichBaseUrl` / `immichApiKey` as manifest
+`<meta-data>`). Every patched app carries credentials and its own HTTP client.
+
+## Requirements change (this revision)
+
+- **Removed:** "Immich-only gallery; never merge device-local media." v2 must present the
+  **full gallery** — local (on-device) and remote (server) assets interleaved exactly as
+  the Immich app's own timeline shows them — and the orchestrator is what provides it.
+- **Immich itself is built from source**, not Morphe-patched. The bridge is first-party
+  Kotlin in the app: no Flutter unpick, no dex injection into a Flutter host, full control
+  of the manifest (custom signature permission on our own provider).
+- **Unchanged:** consumers keep a thin local provider and `_data` staging. An orchestrator
+  cannot hand another app a real path into its sandbox — the v1 traps are all about `_data`
+  needing to be a real file path, and that requirement does not move.
 
 ## Goals for v2
 
-1. **Configure without rebuilding.** A user should point a published `.mpp` at their own
-   server through the app, not through patch options.
-2. **Auto-discover from the Immich app.** If the user is already signed into Immich
-   mobile, no configuration at all should be needed.
-3. **One component reaches out.** Discord and Tumblr should ask the *Immich app* for
-   bytes rather than talking to the server themselves — credentials stay in one place and
-   the data path is transparent.
+1. **Configure without rebuilding.** Point a published `.mpp` at a server through the app.
+2. **Auto-discover from the Immich app.** A signed-in Immich mobile app is enough.
+3. **One component reaches out.** Consumers ask the Immich app for bytes; credentials live
+   in exactly one place.
+4. **Gallery parity.** The picker shows what the Immich app shows, including local assets
+   that are not backed up yet.
 
-## Verified facts (Immich mobile `main`, server v3.4.1, Nov 2026)
+## Verified facts
 
-Everything below was confirmed on a real device; no inference remains in this section.
+### Credentials and session (device-verified)
 
 | Fact | Evidence |
 | --- | --- |
-| The app writes the server endpoint and a session token into **plaintext** `SharedPreferences` for its home-screen widget | `HomeWidgetPreferences.xml` contains `widget_server_url`, `widget_auth_token`, `widget_custom_headers` |
-| Those keys are defined in Dart and written by the widget service | `mobile/lib/constants/constants.dart`, `mobile/lib/services/widget.service.dart` (`writeCredentials` / `clearCredentials`) |
-| The token is the **live session token**, refreshed with auth state and **blanked on logout** | `writeCredentials` called from `mobile/lib/providers/auth.provider.dart`; `clearCredentials` clears the same keys |
-| The Android host already ships a Kotlin reader for exactly these values | `ImmichAPI.getServerConfig(context)` → `ServerConfig(serverURL, sessionKey, customHeaders)`, reading via `HomeWidgetPlugin.getData()` |
-| The widget's request style is `?sessionKey=<token>` and **still works** | `api/server/about?sessionKey=…` → HTTP 200 on v3.4.1 |
-| Bearer auth also works | `Authorization: Bearer <token>` → HTTP 200; `?apiKey=…` → 401 (query-param API keys are not a thing) |
-| The token is a session token, not a JWT | 43 characters |
-| `flutter_secure_storage` is not a barrier for a same-UID reader | its AES key in `FlutterSecureKeyStorage.xml` decodes to a known constant string |
-| The Flutter layer is irrelevant to us | all of the above lives in the Android host + `SharedPreferences`; `libapp.so` is untouched |
+| The app writes the server endpoint and session token into **plaintext** `SharedPreferences` for its home-screen widget | `HomeWidgetPreferences.xml`: `widget_server_url`, `widget_auth_token`, `widget_custom_headers` |
+| Keys are Dart-side constants written by the widget service | `mobile/lib/constants/constants.dart`, `mobile/lib/services/widget.service.dart` (`writeCredentials`/`clearCredentials`) |
+| The token is the **live session token**, tracks auth state, blanked on logout | `writeCredentials` called from `mobile/lib/providers/auth.provider.dart`; `clearCredentials` clears the same keys |
+| The Android host already ships the reader | `widget/ImmichAPI.kt` → `getServerConfig(context)`; also `buildRequestURL(endpoint, params)` |
+| `?sessionKey=<token>` works | `GET /api/server/about?sessionKey=…` → 200 on v3.4.1 |
+| Bearer also works; `?apiKey=` does not | `Authorization: Bearer …` → 200; `?apiKey=…` → 401 |
+| `flutter_secure_storage` is not a barrier to a same-UID reader | its AES key in `FlutterSecureKeyStorage.xml` decodes to a known constant string |
+| The Flutter layer is irrelevant to the bridge | all of the above lives in the Android host + `SharedPreferences` |
 
-Consequence: **reading per request** (never caching) gives a token that tracks the app's
-session, including logout. No refresh logic of our own is needed.
+Consequence: **read per request** (never cache) gives a token that tracks the app,
+including logout. No refresh logic of our own.
+
+### The full gallery (source-verified at tag v3.4.1, executed against the device DB)
+
+- The app's timeline is two drift **named queries** — `mergedAsset` and `mergedBucket` —
+  in `mobile/lib/data/db/main/query/merged_asset.drift`. They are *not* SQL views: the
+  database contains no `merged_asset` object (`sqlite_master` checked on the device DB);
+  drift executes the SQL text with bound parameters.
+- Runtime database: `app_flutter/immich.sqlite` (+`-wal`/`-shm`), WAL mode,
+  `PRAGMA user_version = 35` on the test device.
+- `mergedAsset` semantics (quoted from the file):
+  - **remote rows**: not deleted, `visibility = 0` (timeline), owner in `:user_ids` (self
+    plus partners with `in_timeline`), `group_date` set, stacks collapsed to the primary
+    asset;
+  - **local-only rows**: local assets (MediaStore) with **no remote asset of the same
+    checksum**, and only those in an album with `backup_selection = 0` and not excluded
+    (`= 2`);
+  - **dedup**: a backed-up local asset appears exactly once, as its remote row — the
+    checksum join also folds the `local_id` into that row;
+  - **ordering**: `group_date DESC, created_at DESC`; paging appends
+    `LIMIT <count> OFFSET <offset>`; buckets are day (`group_by = 0`) or month (`= 1`).
+- Evidence: the SQL extracted from the tag was executed against the database pulled from
+  the test device — 13,616 rows, all remote, because all 56 local assets are already
+  checksum-matched (backed up). Local-only rows surface as soon as an unbacked asset
+  exists, which is exactly when a user wants to send it.
+- Consequence: **the bridge does not re-implement merging.** It ships the same SQL text
+  (frozen with the app build — the bridge is compiled into the same binary), binds
+  `:user_ids` from `auth_user_entity` / `partner_entity`, and reads the app's database
+  read-only.
+
+### Build from source (verified locally)
+
+Tag `v3.4.1` pins (all now installed on this machine):
+
+| Tool | Pin | Local state |
+| --- | --- | --- |
+| Flutter | `3.47.2` (exact, in `pubspec.yaml` and `mobile/mise.toml`) | fvm 4.3.2 → `~/fvm/versions/3.47.2` (Dart 3.13.2) |
+| Rust | `1.99.1` (native crate `rust-toolchain.toml`), `1.98.0` (mobile mise pin) | rustup has both, with the Android targets (arm64/armv7/x64) |
+| Node | `24.22.1` | mise 2026.11.5 installed it |
+| openapi-generator-cli | `2.42.0` | mise installed it (generator jar pinned in `open-api/openapitools.json`) |
+| Java | `21` | system JDK 21.0.12 |
+| Android SDK | — | `/opt/android-sdk`, NDK `28.2.13676358` |
+
+- **Checkout:** sparse clone of the tag. Required sparse paths:
+  `mobile native i18n open-api .mise .github`. `.mise` is mandatory (dependency
+  sidecars) — without it npm-tool installs fail with "run `mise lock`". Monorepo warnings
+  about config roots that are not checked out are benign.
+- **CI's canonical steps** (`.github/workflows/build-mobile.yml`), reproducible locally:
+  `mise //mobile:install:ci` → `mise //mobile:codegen` → `flutter build apk --release`.
+- The Dart OpenAPI client is generated from the **checked-in spec**
+  (`open-api/immich-openapi-specs.json`); no server build involved.
+- **Native core:** `native/native_core/hook/build.dart` (via `native_toolchain_rust`)
+  builds the Rust crate per ABI during `flutter build` and rustup-adds the target itself.
+  Comment in the hook worth remembering: *mise sets `RUSTUP_TOOLCHAIN`, which makes rustup
+  ignore `rust-toolchain.toml` targets, so the hook adds what the build needs.*
+- **Signing:** `mobile/android/key.jks` plus `ALIAS` / `ANDROID_KEY_PASSWORD` /
+  `ANDROID_STORE_PASSWORD` env (or `key.properties`). Without a keystore the release build
+  silently falls back to debug signing — never leave that to chance for v2 builds.
+
+### Signing and the signature permission (verified from the patcher)
+
+- Morphe signs patched APKs with a built-in signer ("Morphe") by default; the v1 installs
+  on the device carry its certificate (SHA-256 `6B:9B:2A:1A:C3:92:91:AA:…`).
+- The patcher accepts explicit material: `--keystore`, `--keystore-entry-alias`,
+  `--keystore-entry-password`, `--keystore-password`.
+- **v2 plan:** one project-owned keystore signs **both** the custom Immich build (Gradle)
+  and the patched consumers (via those flags). The `signature`-level permission then
+  grants between exactly these apps, nothing else. v1 consumers get re-patched anyway for
+  v2, so switching keys costs nothing extra. Losing the keystore costs an
+  uninstall/restore cycle on every app — keep a copy off-repo.
 
 ## Architecture
 
 ```
-Immich app (patched)                    Discord / Tumblr (patched)
-  bridge provider                         thin local provider
-    config   -> getServerConfig()            proxy rows + stage _data locally
-    media/** -> sessionKey requests          (exists today; only its upstream changes)
-    own cache + paging
+Immich app (custom build)                     Discord / Tumblr (patched)
+  bridge provider                               thin local provider
+    config   <- widget prefs (live session)       proxy rows + stage _data
+    timeline <- immich.sqlite, mergedAsset SQL    (existing code; new upstream)
+    media    <- server API (remote rows)
+              + MediaStore (local rows)
         ^
-        | signature-level permission
-        +-- every app Morphe signs shares one keystore, so our patched apps
-            trust each other and nothing else does
+        | signature-level permission; same keystore both sides
+        +-- patched consumers and this build are mutually trusted, nothing else
 ```
 
-### Why consumers keep a provider (and staging)
+## The bridge (contract draft)
 
-An orchestrator **cannot** satisfy the traps that v1 fought through. `UriUtil.
-getRealPathFromUri` and Tumblr's `foc.b` require `_data` to be a **real file path**, and
-a path inside the Immich app's sandbox is unreadable by another app. Cross-app file
-sharing has no clean solution on modern Android, so:
+- Authority `app.alextran.immich.bridge`, guarded by
+  `app.alextran.immich.permission.BRIDGE` (`protectionLevel="signature"`), declared and
+  required by the provider. Read-only.
+- `config` → server endpoint + session key via `ImmichAPI.getServerConfig(context)`, or a
+  clean "not signed in" signal (blanked prefs).
+- `timeline?count&offset` → rows exactly as `mergedAsset` yields them: kind (remote /
+  local-only), name, type, created/updated, width/height, duration, checksum, favorite,
+  owner; remote rows also carry `thumb_hash`.
+- `asset/<key>/thumb` → preview. Remote rows: `/assets/{id}/thumbnail` (WebP — report
+  `image/webp` exactly as v1 learned to). Local rows: MediaStore thumbnail.
+- `asset/<key>/original` → bytes. Remote rows: `/assets/{id}/original`. Local rows: the
+  local file streamed. Sizes: remote via cached `HEAD` (v1 behaviour), local from
+  MediaStore.
+- Keys: `r/<remoteId>` and `l/<mediaStoreId>`, stable; consumers keep mapping to their own
+  numeric ids, so the consumer side never changes shape.
+- Degradation: if the database cannot be read (e.g. first launch before migration), serve
+  the remote-only timeline and say so; logout of Immich disables the bridge naturally.
 
-- the **bridge** owns credentials, HTTP, caching and paging;
-- each **consumer** keeps a thin local provider that proxies rows and materialises
-  originals into its own cache (`cache/immich/staged/`), exactly as v1 does.
+## Config resolution order
 
-That staging code is already written and verified. v2 changes only where bytes come from.
-
-### Config resolution order
-
-1. In-app settings (below).
-2. Bridge provider — automatic when the Immich app is installed and signed in.
-3. Patch-time `<meta-data>` — keeps existing personal builds working.
-
-Resolution 3 also covers users who patch without the Immich app installed, and any
-consumer where the bridge is unreachable.
-
-## Security model
-
-The bridge exposes a live session token, so it must not be world-readable.
-
-- Define a **custom permission with `android:protectionLevel="signature"`** in the
-  Immich app's manifest, and declare it on the provider.
-- Consumers request it. Because Morphe signs everything it patches with the same
-  keystore, our patched apps share a signature and the permission is granted; unpatched
-  apps are refused. Third-party users get the same property with their own keystore.
-- Do **not** use `android:exported="true"` without the permission, and do not rely on
-  obscurity of the authority.
-
-Fallback if signature matching proves awkward (e.g. per-app keystores): expose `config`
-only to the *user's own* entered settings and serve only `media/**` from the bridge,
-since media bytes are not credentials.
+1. In-app settings (Phase 4): server URL + token, "Test connection" hitting
+   `/server/about`, stored in the consumer's `SharedPreferences`.
+2. Bridge provider — automatic when the Immich app is installed, patched and signed in.
+3. Patch-time `<meta-data>` — keeps personal builds working with neither of the above.
 
 ## Work plan
 
-### Phase 0 — map the Android host
+- **Phase 0 — host, toolchain, data source: done.** Manifest/host mapped, Kotlin seams
+  located, merge query identified and executed against the device DB, toolchain installed,
+  CI recipe reproduced in the operational notes. Remaining: **run the unmodified baseline
+  build** end to end (install:ci → codegen → APK) to prove the pipeline before adding code.
+- **Phase 1 — bridge skeleton.** New Kotlin package (e.g.
+  `mobile/android/app/src/main/kotlin/app/alextran/immich/bridge/`), provider + permission
+  in the manifest, read-only provider.
+- **Phase 2 — config endpoint.** Reuse `widget/ImmichAPI.kt`; surface "not signed in".
+- **Phase 3 — timeline and media.** `mergedAsset` SQL read-only against
+  `app_flutter/immich.sqlite`; remote via the app's HTTP stack (OkHttp + coroutines
+  already on the classpath); local via MediaStore (projection constants already exist in
+  `sync/MessagesImplBase.kt`).
+- **Phase 4 — consumers.** Point the existing client upstream at the bridge (keep the
+  meta-data fallback), settings Activity + synthetic album row (`Immich settings`),
+  re-patch consumers with the project keystore.
+- **Phase 5 — polish.** Active source visible in settings; staged-file sweep (already in
+  v1); document the bridge so other hosts can implement it; licence layout for the Immich
+  modifications (below).
 
-- Decode `app.alextran.immich` and read its manifest: activities, providers, permissions,
-  `requiredSplitTypes`, and where the Flutter engine is initialised.
-- Confirm a Morphe `resourcePatch` can add a `<provider>` and a `<permission>`, and that
-  a `bytecodePatch` can inject an extension dex into the host (the app is Flutter, so the
-  host has few classes — verify the extension loads before the engine starts).
-- Check whether the app is split (`base__abi` / `base__density`) like the other two.
+## Operational notes
 
-### Phase 1 — bridge skeleton
+- **Checkout:** `/home/lucy/media/Android/immich-app` — sparse clone of tag `v3.4.1`
+  (`mobile native i18n open-api .mise .github`, ~113 MB).
+- **Build (each time):**
 
-- Provider authority, e.g. `app.alextran.immich.immich.bridge`.
-- Signature permission, declared and required.
-- `call()` or plain URIs; keep it read-only.
+  ```bash
+  cd /home/lucy/media/Android/immich-app
+  export PATH="$HOME/fvm/versions/3.47.2/bin:$PATH"
+  export ANDROID_HOME=/opt/android-sdk
+  mise //mobile:install:ci      # dart client from open-api/ + pub get --enforce-lockfile
+  mise //mobile:codegen         # build_runner, drift, pigeon, i18n, native bindings
+  cd mobile && flutter build apk --release --target-platform android-arm64
+  # -> mobile/build/app/outputs/flutter-apk/app-release.apk
+  ```
 
-### Phase 2 — config endpoint
+  Arm64 only: the device is arm64 (CI additionally builds universal + split-per-abi).
+- **Replacing the device's Immich app** (custom build keeps `applicationId
+  app.alextran.immich` but has a different signer): back up
+  `/data/data/app.alextran.immich` and `/data/user_de/0/app.alextran.immich` **before
+  uninstalling** — they carry the login session
+  (`shared_prefs/HomeWidgetPreferences.xml`) and the timeline DB (`app_flutter/immich.sqlite`).
+  Restore, `chown -R <uid>`, and `chcon` as in v1. Logging in again also works but
+  re-downloads the sync state.
+- **Pull the DB for local SQL iteration** (used for the evidence above):
+  `app_flutter/immich.sqlite{,-wal,-shm}`; a copy lives at `/tmp/opencode/immich-db/`
+  (ephemeral). Bind `:user_ids` with `(SELECT id FROM auth_user_entity)` for quick checks.
+- **Device:** TCL T607DL, Android 13 (API 33), arm64, KernelSU root, ADB serial
+  `NJZLI7DEB6SSWKEQ`. Wake before tests, screen off after.
+- **Patcher:** `MORPHE_JAR=~/Downloads/morphe-desktop-1.15.0-all.jar`; v2 `patch.sh` gets
+  explicit keystore flags.
+- **Debugging:** extension traces to logcat and `files/immich-debug.log`; Frida 17.26.2
+  with `frida-ksud` on device. RE tooling: `apk-re/bin/*`, jadx 1.5.6, apktool 3.0.3.
+- **Repos:** patches `/home/lucy/media/Android/immich-media-patches` (public, The
+  Unlicense); RE notes `/home/lucy/media/Android/apk-re` (private).
 
-- Reuse `ImmichAPI.getServerConfig(context)`; return the endpoint + session token, or a
-  clear "not signed in" signal when the app is logged out (prefs blank).
+## Licensing
 
-### Phase 3 — media endpoints
+Immich mobile is **AGPL-3.0**; the bridge modifications are a derivative work. If a built
+Immich APK is ever distributed, the modified source must be available with it. Plan: keep
+the bridge sources in one clearly-licensed place — e.g. an `immich-bridge/` directory with
+its own AGPL-3.0 `LICENSE` and a note in the root — while this repo's own patch code stays
+The Unlicense. Personal builds carry no obligation, but the layout should not rely on that.
 
-- `media` listing: paged timeline search, same 500-per-page contract v1 uses so offset
-  arithmetic stays stable.
-- `media/<id>/thumb` → `/thumbnail?size=thumbnail` (WebP, as v1 reports).
-- `media/<id>/original` → `/original`, with `Content-Length` available for the `_size`
-  contract consumers rely on.
-- Own cache inside the Immich app's cache dir; reuse the bundled Gson and
-  `ImmichAPI.buildRequestURL` rather than adding a client.
+## Relationship to `immich-cloud-media`
 
-### Phase 4 — consumers
-
-- Point the existing client upstream at the bridge when available; keep the manifest
-  meta-data path as fallback.
-- Settings Activity in the extension: server URL + token/API key, "Test connection"
-  hitting `/api/server/about` and printing the version, stored in the consumer's
-  `SharedPreferences`.
-- Entry point: a synthetic album row (`Immich settings`) at the top of the picker's
-  folder list, launching the settings Activity.
-
-### Phase 5 — polish
-
-- Surface which source is active (bridge / manual / baked) in the settings screen.
-- Sweep staged files, as v1 does.
-- Document the bridge contract so a future host can implement it.
-
-## Operational notes (needed to resume)
-
-- **Repos.** Patch source: `/home/lucy/media/Android/immich-media-patches` (public,
-  The Unlicense). RE notes: `/home/lucy/media/Android/apk-re` (private).
-- **Build.** `./build.sh` → `build/immich-media-patches.mpp`; needs
-  `MORPHE_JAR` (`~/Downloads/morphe-desktop-1.15.0-all.jar`), `ANDROID_JAR`
-  (`/opt/android-sdk/platforms/android-36/android.jar`), `BUILD_TOOLS`
-  (`/opt/android-sdk/build-tools/37.0.0`). Kotlin compiler jars are cached in
-  `~/.cache/immich-media-patches`.
-- **Patch and install.** `./patch.sh <app> <apk>` with options from the gitignored
-  `.env`. Use **merged** APKs (splits folded in) — the base alone lacks native libraries.
-  Patching the base also requires removing `requiredSplitTypes` (the patch does it).
-- **Device.** TCL T607DL, Android 13 (API 33), arm64, KernelSU root, ADB over USB
-  (serial `NJZLI7DEB6SSWKEQ`). Wake before tests, screen off after.
-- **Install dance** (root, both apps): `pm uninstall` → `pm install -r` → restore data
-  from a `tar` of `/data/data/<pkg>` and `/data/user_de/0/<pkg>` →
-  `chown -R <new uid>` → **`chcon -R u:object_r:app_data_file:s0:c<uid-10000>,c256,c512,c768`**.
-  `restorecon` does not follow the `/data/data` symlink and Discord hard-crashes without
-  the relabel. Pull data backups before wiping.
-- **Debugging.** The extension traces to logcat and to `files/immich-debug.log` in each
-  app; both apps' own loggers are routed into it for the packages that matter. Frida
-  17.26.2 on the host and `frida-ksud` on the device are set up and were decisive for the
-  last v1 bug — reach for it when a trace is ambiguous.
-- **RE tooling.** `apk-re/bin/apk-decode|apk-info|apk-pull|apk-sign`, jadx 1.5.6,
-  apktool 3.0.3, and the REA Android tools (`inspect_android_method`,
-  `trace_android_references`, …). REA indexes only classes inside the APK, so framework
-  xrefs still need a dex scan.
+`Dreaming-Codes/immich-cloud-media` (checked out at
+`/home/lucy/media/Android/immich-cloud-media`) is the **system photo picker** route: a
+`CloudMediaProvider` enabled via `device_config allowed_cloud_providers`, so any app using
+Android's default picker gets Immich as a cloud source, and the OS interleaves it with
+local media. It is complementary, not a dependency: Discord and Tumblr use their own
+in-app pickers, which is why they need Morphe patches. Its README is also a handy map of
+which Immich endpoints and API-key permissions a cloud-media integration needs.
 
 ## Risks and open questions
 
-- **Immich app version pinning.** The bridge reuses app internals
-  (`ImmichAPI.getServerConfig`, `HomeWidgetPlugin.getData`). Pin the patch to a tested
-  version and fail loudly when the target is absent, as the other patches do.
-- **Session token lifetime.** Reading per request tracks the app, but if the token is
-  ever short-lived while the app is backgrounded, the bridge must surface that rather
-  than fail silently. Decide behaviour after observing real p95 usage.
-- **`sessionKey` deprecation.** It works today; Bearer also works. Prefer Bearer in new
-  code and keep `sessionKey` only if mirroring the widget exactly buys simplicity.
-- **Server API drift.** The user's server moved v3.3.5 → v3.4.1 during v1. Re-check the
-  search/thumbnail/original shapes whenever the bridge starts talking to a new version.
-- **Provider injection into a Flutter host.** Unverified: the host is small, so if dex
-  injection is awkward, an alternative is an exported service in the same app or (last
-  resort) resolving config only, leaving HTTP in the consumers.
-- **Split requirement.** Confirm the Immich app's manifest state and whether the patch
-  must strip `requiredSplitTypes` like the other two.
+- **Build pipeline weight.** First build is long (Flutter + Rust native assets + codegen).
+  Flutter 3.47 native-assets support may need a `flutter config` flag — verify on the
+  baseline build.
+- **Toolchain pin churn.** Pins differ per tag (this tag: Flutter 3.47.2 / Rust pins
+  1.98.0 + 1.99.1; `main` had 3.47.9 / 1.99.1). Re-read the pins at every tag bump.
+- **SQL coupling is versioned with the app** — the bridge ships inside the same binary, so
+  drift is a non-issue for our builds; care only when bumping the app tag (re-copy
+  `merged_asset.drift`, diff).
+- **Database not yet migrated** (first launch) → bridge falls back to remote-only.
+- **Session token lifetime**: read per request; if backgrounded life turns out to be
+  short, surface it rather than fail silently.
+- **`sessionKey` deprecation**: works on v3.4.1; Bearer also works — prefer Bearer in new
+  code.
+- **Server API drift**: re-check search/thumbnail/original shapes on server bumps
+  (v3.3.5 → v3.4.1 happened during v1).
+- **Keystore hygiene**: one key for Immich + consumers, stored off-repo; loss = reinstall
+  cycle everywhere.
+- **App version pinning** (updated): upgrading = checkout new tag, re-apply the bridge
+  patch, re-copy the SQL, rebuild, re-run the install dance.
+- **Gallery semantics worth knowing**: local-only rows are limited to assets in
+  backup-selected albums, by the app's own query. We mirror that deliberately — "the
+  orchestrator provides what the app's gallery shows".
 
 ## References
 
-- Patch source and v1 trap table: `../README.md`.
-- RE notes (private): `../../apk-re/notes/immich-patch-verification.md`,
-  `tumblr-runtime-traps.md`, `discord-media-protocol.md`.
-- Immich upstream, paths relied on: `mobile/lib/constants/constants.dart`,
-  `mobile/lib/services/widget.service.dart`, `mobile/lib/providers/auth.provider.dart`,
-  `mobile/android/app/src/main/kotlin/app/alextran/immich/widget/ImmichAPI.kt`.
+- Upstream (in the checkout): `mobile/lib/data/db/main/query/merged_asset.drift` (merge
+  SQL), `mobile/lib/data/db/main/database.dart` (DB path/open, schema 35),
+  `mobile/android/app/src/main/kotlin/app/alextran/immich/` (Kotlin host),
+  `native/native_core/hook/build.dart` (Rust build hook),
+  `.github/workflows/build-mobile.yml` (CI recipe).
+- RE notes (private): `apk-re/notes/immich-app-android-host.md`,
+  `apk-re/notes/immich-patch-verification.md`, `apk-re/notes/tumblr-runtime-traps.md`.
+- v1 design + trap table: `../README.md`.
