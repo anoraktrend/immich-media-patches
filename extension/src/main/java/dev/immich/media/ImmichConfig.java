@@ -7,23 +7,44 @@ import android.os.Bundle;
 import android.util.Log;
 
 /**
- * Reads the Immich server configuration that the patch bakes into the host
- * application's AndroidManifest.xml as &lt;meta-data&gt; entries.
+ * Resolves how this patched app reaches Immich, in priority order:
+ *
+ * <ol>
+ *   <li><b>Bridge</b> (v2): the Immich app on this device, signed with the same key and
+ *       signed in, serves configuration, timeline and media through a content provider.</li>
+ *   <li><b>Direct</b> (v1): the server URL and API key that the patch baked into the
+ *       manifest as &lt;meta-data&gt;.</li>
+ * </ol>
+ *
+ * When the Immich app is signed out or absent, the baked values keep the picker
+ * working exactly as in v1.
  */
 public final class ImmichConfig {
 
     private static final String TAG = "ImmichMedia";
 
+    public static final int MODE_NONE = 0;
+    public static final int MODE_DIRECT = 1;
+    public static final int MODE_BRIDGE = 2;
+
     private static volatile ImmichConfig instance;
     private static volatile Context appContext;
 
+    public final int mode;
+    /** Direct mode: server URL (no trailing slash). */
     public final String baseUrl;
+    /** Direct mode: API key. */
     public final String apiKey;
+    /** Bridge mode: server URL the Immich app is using (informational). */
+    public final String serverUrl;
+    /** This app's own media provider authority. */
     public final String authority;
 
-    private ImmichConfig(String baseUrl, String apiKey, String authority) {
+    private ImmichConfig(int mode, String baseUrl, String apiKey, String serverUrl, String authority) {
+        this.mode = mode;
         this.baseUrl = baseUrl;
         this.apiKey = apiKey;
+        this.serverUrl = serverUrl;
         this.authority = authority;
     }
 
@@ -54,7 +75,27 @@ public final class ImmichConfig {
         return appContext;
     }
 
+    public boolean bridge() {
+        return mode == MODE_BRIDGE;
+    }
+
+    public boolean isConfigured() {
+        return mode != MODE_NONE;
+    }
+
     private static ImmichConfig load(Context context) {
+        String authority = context.getPackageName() + ".immich.media";
+
+        // 1. The Immich app's bridge, when installed and signed in.
+        Bundle bridge = ImmichBridge.config(context);
+        if (bridge != null) {
+            appContext = context;
+            ImmichLog.d("config: bridge mode, server=" + bridge.getString("serverUrl"));
+            return new ImmichConfig(MODE_BRIDGE, null, null,
+                    bridge.getString("serverUrl"), authority);
+        }
+
+        // 2. Fall back to the values baked in at patch time.
         String baseUrl = null;
         String apiKey = null;
         try {
@@ -74,10 +115,9 @@ public final class ImmichConfig {
             }
         }
         appContext = context;
-        return new ImmichConfig(baseUrl, apiKey, context.getPackageName() + ".immich.media");
-    }
-
-    public boolean isConfigured() {
-        return baseUrl != null && baseUrl.length() > 0 && apiKey != null && apiKey.length() > 0;
+        boolean direct = baseUrl != null && baseUrl.length() > 0 && apiKey != null && apiKey.length() > 0;
+        ImmichLog.d("config: " + (direct ? "direct mode" : "not configured"));
+        return new ImmichConfig(direct ? MODE_DIRECT : MODE_NONE,
+                baseUrl, apiKey, baseUrl, authority);
     }
 }

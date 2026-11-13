@@ -99,14 +99,13 @@ public final class ImmichMediaProvider extends ContentProvider {
                     }
                 }
                 if (asset.size <= 0L) {
-                    // Callers such as the uploader validate the media by size, and the search
-                    // API does not report one. Ask the server here, where it is a single item.
-                    long size = client.remoteSize(asset.uuid);
+                    // Callers such as the uploader validate the media by size, and the timeline
+                    // row does not carry one. Resolve it here, where it is a single item —
+                    // through the bridge (remote or local rows) or a HEAD in direct mode.
+                    long size = client.size(asset);
                     if (size > 0L) {
                         store.updateSize(id, size);
-                        asset = new ImmichAsset(asset.uuid, asset.name, asset.mime, asset.mediaType,
-                                asset.width, asset.height, asset.orientation, asset.dateAdded,
-                                asset.durationMs, size);
+                        asset = asset.withSize(size);
                         ImmichLog.d("resolved size for " + id + " = " + size);
                     }
                 }
@@ -168,7 +167,7 @@ public final class ImmichMediaProvider extends ContentProvider {
                     if (id > 0L) {
                         result.add(new Entry(asset, id));
                     } else {
-                        ImmichLog.w("no id for asset " + asset.uuid);
+                        ImmichLog.w("no id for asset " + asset.key);
                     }
                 }
             }
@@ -282,7 +281,7 @@ public final class ImmichMediaProvider extends ContentProvider {
                     // loaders pick their decoder from this value before reading any bytes.
                     return "image/webp";
                 }
-                String detected = ContentTypes.known(asset.uuid);
+                String detected = ContentTypes.known(asset.key);
                 if (detected != null) {
                     return detected;
                 }
@@ -339,14 +338,13 @@ public final class ImmichMediaProvider extends ContentProvider {
         }
         boolean preview = isPreview(uri);
         File file = preview ? thumbnailFile(asset) : originalFile(asset);
-        String url = preview ? client.thumbnailUrl(asset.uuid) : client.originalUrl(asset.uuid);
-        ImmichNet.fetch(url, config.apiKey, file);
+        client.download(asset, preview, file);
         if (!preview) {
             String detected = ContentTypes.sniff(file);
             if (detected != null) {
-                ContentTypes.remember(asset.uuid, detected);
+                ContentTypes.remember(asset.key, detected);
                 if (!detected.equals(asset.mime)) {
-                    ImmichLog.w("mime mismatch " + asset.uuid + " metadata=" + asset.mime
+                    ImmichLog.w("mime mismatch " + asset.key + " metadata=" + asset.mime
                             + " actual=" + detected);
                 }
             }
@@ -357,7 +355,7 @@ public final class ImmichMediaProvider extends ContentProvider {
 
     private File thumbnailFile(ImmichAsset asset) {
         File directory = new File(getContext().getCacheDir(), "immich/thumbs");
-        return new File(directory, asset.uuid);
+        return new File(directory, asset.fileKey());
     }
 
     private File originalFile(ImmichAsset asset) {
@@ -366,7 +364,7 @@ public final class ImmichMediaProvider extends ContentProvider {
         if (extension == null || extension.length() == 0) {
             extension = "bin";
         }
-        return new File(directory, asset.uuid + "." + extension);
+        return new File(directory, asset.fileKey() + "." + extension);
     }
 
     private long idFrom(Uri uri) {

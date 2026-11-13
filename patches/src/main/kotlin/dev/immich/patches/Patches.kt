@@ -534,24 +534,62 @@ private fun installProvider(context: ResourcePatchContext, authority: String) {
         removeElements(document, "meta-data", "android:name", "com.android.vending.splits.required")
         removeElements(document, "meta-data", "android:name", "com.android.vending.splits")
 
-        addMetaData(document, application, "immich.baseUrl", baseUrl)
-        addMetaData(document, application, "immich.apiKey", apiKey)
+        // Baked fallback (the v1 path): only present when values were provided.
+        if (baseUrl.isNotEmpty()) {
+            addMetaData(document, application, "immich.baseUrl", baseUrl)
+        }
+        if (apiKey.isNotEmpty()) {
+            addMetaData(document, application, "immich.apiKey", apiKey)
+        }
 
-        if (document.getElementsByTagName("uses-permission").let { nodes ->
-                (0 until nodes.length).none { index ->
-                    (nodes.item(index) as? Element)
-                        ?.getAttribute("android:name") == "android.permission.INTERNET"
-                }
+        ensureUsesPermission(document, "android.permission.INTERNET")
+
+        // v2: configuration and media come from the Immich app's bridge provider.
+        // The permission is signature level (only apps signed like the Immich build get
+        // it) and <queries> is mandatory because Android 11+ hides other apps'
+        // providers otherwise — the failure mode is an "Unknown authority" exception
+        // that even shell testing cannot reproduce.
+        ensureUsesPermission(document, "app.alextran.immich.permission.BRIDGE")
+        ensureBridgeQuery(document)
+    }
+}
+
+private fun ensureUsesPermission(document: org.w3c.dom.Document, permission: String) {
+    val nodes = document.getElementsByTagName("uses-permission")
+    val present = (0 until nodes.length).any { index ->
+        (nodes.item(index) as? Element)?.getAttribute("android:name") == permission
+    }
+    if (!present) {
+        val element = document.createElement("uses-permission")
+        element.setAttribute("android:name", permission)
+        document.getDocumentElement().insertBefore(
+            element,
+            document.getElementsByTagName("application").item(0),
+        )
+    }
+}
+
+private fun ensureBridgeQuery(document: org.w3c.dom.Document) {
+    val queryNodes = document.getElementsByTagName("queries")
+    for (index in 0 until queryNodes.length) {
+        val queries = queryNodes.item(index) as? Element ?: continue
+        val providers = queries.getElementsByTagName("provider")
+        for (providerIndex in 0 until providers.length) {
+            val authorities = (providers.item(providerIndex) as? Element)
+                ?.getAttribute("android:authorities")
+            if (authorities == "app.alextran.immich.bridge") {
+                return
             }
-        ) {
-            val permission = document.createElement("uses-permission")
-            permission.setAttribute("android:name", "android.permission.INTERNET")
-            document.getDocumentElement().insertBefore(
-                permission,
-                document.getElementsByTagName("application").item(0),
-            )
         }
     }
+    val queries = if (queryNodes.length > 0) {
+        queryNodes.item(0) as Element
+    } else {
+        document.createElement("queries").also { document.getDocumentElement().appendChild(it) }
+    }
+    val provider = document.createElement("provider")
+    provider.setAttribute("android:authorities", "app.alextran.immich.bridge")
+    queries.appendChild(provider)
 }
 
 private fun addMetaData(

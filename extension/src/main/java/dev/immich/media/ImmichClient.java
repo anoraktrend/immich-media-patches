@@ -1,11 +1,14 @@
 package dev.immich.media;
 
+import android.content.Context;
+import android.os.Bundle;
 import android.util.Log;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -74,6 +77,9 @@ public final class ImmichClient {
         if (!config.isConfigured()) {
             return new Page(Collections.<ImmichAsset>emptyList(), 0);
         }
+        if (config.bridge()) {
+            return fetchBridge(pageNumber);
+        }
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(config.baseUrl + "/api/search/metadata").openConnection();
@@ -122,6 +128,40 @@ public final class ImmichClient {
                 connection.disconnect();
             }
         }
+    }
+
+    /** v2: the Immich app's own timeline, through the bridge provider. */
+    private Page fetchBridge(int pageNumber) throws IOException {
+        List<Bundle> rows = ImmichBridge.timeline(config.context(), PAGE_SIZE,
+                (pageNumber - 1) * PAGE_SIZE);
+        if (rows == null) {
+            throw new IOException("bridge timeline unavailable");
+        }
+        List<ImmichAsset> parsed = new ArrayList<ImmichAsset>(rows.size());
+        for (Bundle row : rows) {
+            parsed.add(ImmichAsset.fromBridge(row));
+        }
+        return new Page(parsed, (pageNumber - 1) * PAGE_SIZE + parsed.size());
+    }
+
+    /** Bridge aware download: content URI in bridge mode, HTTP otherwise. */
+    public void download(ImmichAsset asset, boolean preview, File destination) throws IOException {
+        if (config.bridge()) {
+            ImmichBridge.copyToFile(config.context(), asset.uri(preview ? "thumb" : "original"),
+                    destination);
+        } else {
+            String url = preview ? thumbnailUrl(asset.id()) : originalUrl(asset.id());
+            ImmichNet.fetch(url, config.apiKey, destination);
+        }
+    }
+
+    /** Byte size of the original: bridge call in bridge mode, HEAD otherwise. */
+    public long size(ImmichAsset asset) {
+        if (config.bridge()) {
+            long bridged = ImmichBridge.size(config.context(), asset.key);
+            return bridged > 0L ? bridged : 0L;
+        }
+        return remoteSize(asset.id());
     }
 
     public String thumbnailUrl(String uuid) {

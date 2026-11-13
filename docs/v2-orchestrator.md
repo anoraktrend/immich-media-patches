@@ -141,6 +141,18 @@ GitHub fork of `immich-app/immich`, public like upstream) with a working branch
 - Licensing falls out of the fork: the modified app stays AGPL-3.0 with its source, and
   nothing AGPL needs to live in this Unlicense repository.
 
+## OS support
+
+| API level | Notes |
+| --- | --- |
+| 33+ (tested on 13) | `READ_MEDIA_{IMAGES,VIDEO,AUDIO}` grants; everything verified here |
+| 30–32 (Android 11/12) | Fully viable. `<queries>` is mandatory exactly as on 13. Media grants are `READ_EXTERNAL_STORAGE` (the Immich manifest already declares it with `maxSdkVersion=32`) — replay that name, not the `READ_MEDIA_*` set. Local previews use `loadThumbnail` (29+) ✓. |
+| 26–28 (Android 8–9) | Orchestrator builds (minSdk 26) and the bridge works, with one gap: local-only previews need `loadThumbnail` (API 29+), so add a `MediaStore.Images.Thumbnails`/decode fallback before claiming support. |
+
+The consumer side needs nothing version-specific beyond what the host apps already use
+(Bundle query args since API 26, `openFileDescriptor`, `_data` staging) — the whole v1
+trap table is API-agnostic.
+
 ## Architecture
 
 ```
@@ -209,7 +221,18 @@ Install-dance notes (stock → custom build, all verified):
   (or open the app UI and let it ask), then restart the app to re-sync.
 - Data (prefs incl. the live login, `app_flutter/immich.sqlite`) survives the tar round
   trip.
+- **Consumers (Discord/Tumblr)** take the same dance: back up with tar (Discord ~51 MB
+  with cache; Tumblr is 616 MB of which 602 MB is cache — exclude `com.tumblr/cache`).
+  After restore, **grant explicitly** — replaying a captured grant diff proved flaky:
+  `pm grant <pkg> android.permission.{READ_MEDIA_IMAGES,READ_MEDIA_VIDEO,POST_NOTIFICATIONS}`
+  on 13+ (`READ_EXTERNAL_STORAGE` below 33). Logins live in `shared_prefs` and survive.
 - Frida 17.26.2 is online (`frida-ps -U`) for deeper debugging.
+- **Consumer verification (2026-11-13):** with both apps re-patched and installed over
+  restored data, their providers list bridge pages (`page 1 items=500 total=500`), a
+  single-item query resolves `_size=587120` through the bridge and stages the original
+  into the app cache, and `content read` returns 18730 / 587120 bytes for thumb and
+  original — byte-identical to the probe. Bridge mode is logged as `config: bridge mode`
+  in each app's `files/immich-debug.log`.
 
 ### Bridge traps found on device (2026-11-13)
 
@@ -254,9 +277,12 @@ Install-dance notes (stock → custom build, all verified):
 - **Phase 3 — timeline and media: done (2026-11-13).** Timeline from the app's own
   `mergedAsset` SQL (requery SQLite), with size/thumb/original for remote and local
   rows — all verified with the probe. See "Bridge verification" and "Bridge traps".
-- **Phase 4 — consumers.** Point the existing client upstream at the bridge (keep the
-  meta-data fallback), settings Activity + synthetic album row (`Immich settings`),
-  re-patch consumers with the project keystore.
+- **Phase 4 — consumers: bridge client done and verified (2026-11-13).** The extension
+  resolves bridge → baked meta-data; timeline, size, thumbnails, originals and staging
+  all flow through the bridge; `<queries>` and the signature permission are added to the
+  patched manifests; both apps are re-signed with the project keystore and installed
+  over restored data. Remaining: the settings Activity + synthetic album row
+  (`Immich settings`) for users without the Immich app, and the UI send tests.
 - **Phase 5 — polish.** Active source visible in settings; staged-file sweep (already in
   v1); document the bridge so other hosts can implement it; licence layout for the Immich
   modifications (below).

@@ -19,9 +19,9 @@ final class ImmichStage {
     }
 
     static File fileFor(Context context, ImmichAsset asset) {
-        String name = asset.name == null || asset.name.length() == 0 ? asset.uuid : asset.name;
+        String name = asset.name == null || asset.name.length() == 0 ? asset.fileKey() : asset.name;
         return new File(directory(context),
-                asset.uuid + "-" + name.replaceAll("[^A-Za-z0-9._-]", "_"));
+                asset.fileKey() + "-" + name.replaceAll("[^A-Za-z0-9._-]", "_"));
     }
 
     /** Downloads the original when needed and returns the staged file, or null on failure. */
@@ -35,11 +35,10 @@ final class ImmichStage {
         }
         File target = fileFor(context, asset);
         try {
-            ImmichNet.fetch(config.baseUrl + "/api/assets/" + asset.uuid + "/original",
-                    config.apiKey, target);
+            new ImmichClient(config).download(asset, false, target);
             return target.isFile() && target.length() > 0L ? target : null;
         } catch (IOException e) {
-            ImmichLog.w("staging failed for " + asset.uuid + ": " + e);
+            ImmichLog.w("staging failed for " + asset.key + ": " + e);
             return null;
         }
     }

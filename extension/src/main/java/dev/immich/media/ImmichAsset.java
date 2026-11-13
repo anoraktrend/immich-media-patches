@@ -1,5 +1,8 @@
 package dev.immich.media;
 
+import android.net.Uri;
+import android.os.Bundle;
+
 import org.json.JSONObject;
 
 import java.util.Calendar;
@@ -12,7 +15,8 @@ public final class ImmichAsset {
     public static final int TYPE_IMAGE = 1;
     public static final int TYPE_VIDEO = 3;
 
-    public final String uuid;
+    /** Stable identity: "r/&lt;uuid&gt;" for remote rows, "l/&lt;mediaStoreId&gt;" for local-only rows. */
+    public final String key;
     public final String name;
     public final String mime;
     public final int mediaType;
@@ -24,9 +28,9 @@ public final class ImmichAsset {
     public final long durationMs;
     public final long size;
 
-    public ImmichAsset(String uuid, String name, String mime, int mediaType, int width, int height,
+    public ImmichAsset(String key, String name, String mime, int mediaType, int width, int height,
                        int orientation, long dateAdded, long durationMs, long size) {
-        this.uuid = uuid;
+        this.key = key;
         this.name = name;
         this.mime = mime;
         this.mediaType = mediaType;
@@ -36,6 +40,33 @@ public final class ImmichAsset {
         this.dateAdded = dateAdded;
         this.durationMs = durationMs;
         this.size = size;
+    }
+
+    /** Bare id: the server uuid for remote rows, the MediaStore id for local rows. */
+    public String id() {
+        if (key != null && key.length() > 2 && key.charAt(1) == '/') {
+            return key.substring(2);
+        }
+        return key;
+    }
+
+    public boolean local() {
+        return key != null && key.startsWith("l/");
+    }
+
+    /** Key with no path separators, safe as a cache file name. */
+    public String fileKey() {
+        return key == null ? "unknown" : key.replace('/', '_');
+    }
+
+    public ImmichAsset withSize(long newSize) {
+        return new ImmichAsset(key, name, mime, mediaType, width, height, orientation,
+                dateAdded, durationMs, newSize);
+    }
+
+    /** Bridge URI for this asset ({@code thumb} or {@code original}). */
+    public Uri uri(String kind) {
+        return ImmichBridge.uri(kind, key);
     }
 
     public static ImmichAsset fromJson(JSONObject object) {
@@ -64,6 +95,61 @@ public final class ImmichAsset {
                 created / 1000L,
                 parseDuration(object.opt("duration")),
                 0L);
+    }
+
+    /** One row of the Immich app's own timeline (bridge protocol 1). */
+    public static ImmichAsset fromBridge(Bundle row) {
+        String key = row.getString("key");
+        String name = row.getString("name");
+        if (name == null || name.length() == 0) {
+            name = "immich-" + (key == null ? "asset" : key.replace('/', '-'));
+        }
+        // The app's AssetType enum: other=0, image=1, video=2, audio=3.
+        int mediaType = row.getInt("type", 1) == 2 ? TYPE_VIDEO : TYPE_IMAGE;
+        long created = row.getLong("createdAt", 0L);
+        return new ImmichAsset(
+                key,
+                name,
+                mimeFromName(name, mediaType),
+                mediaType,
+                row.getInt("width", 0),
+                row.getInt("height", 0),
+                row.getInt("orientation", 0),
+                created / 1000L,
+                row.getInt("durationMs", 0),
+                0L);
+    }
+
+    private static String mimeFromName(String name, int mediaType) {
+        int dot = name.lastIndexOf('.');
+        if (dot >= 0 && dot < name.length() - 1) {
+            String extension = name.substring(dot + 1).toLowerCase(Locale.US);
+            if ("jpg".equals(extension) || "jpeg".equals(extension)) {
+                return "image/jpeg";
+            }
+            if ("png".equals(extension)) {
+                return "image/png";
+            }
+            if ("webp".equals(extension)) {
+                return "image/webp";
+            }
+            if ("heic".equals(extension) || "heif".equals(extension)) {
+                return "image/heic";
+            }
+            if ("gif".equals(extension)) {
+                return "image/gif";
+            }
+            if ("mp4".equals(extension)) {
+                return "video/mp4";
+            }
+            if ("mov".equals(extension)) {
+                return "video/quicktime";
+            }
+            if ("webm".equals(extension)) {
+                return "video/webm";
+            }
+        }
+        return mediaType == TYPE_VIDEO ? "video/mp4" : "image/jpeg";
     }
 
     /** Accepts both millisecond numbers and "H:MM:SS.mmm" strings. */

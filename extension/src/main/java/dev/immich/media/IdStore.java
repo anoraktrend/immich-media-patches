@@ -60,18 +60,18 @@ public final class IdStore extends SQLiteOpenHelper {
     }
 
     public synchronized long idFor(ImmichAsset asset) {
-        Long cached = idByUuid.get(asset.uuid);
+        Long cached = idByUuid.get(asset.key);
         if (cached != null) {
             return cached.longValue();
         }
         SQLiteDatabase db = getWritableDatabase();
-        long existing = findId(db, asset.uuid);
+        long existing = findId(db, asset.key);
         if (existing > 0L) {
-            remember(asset.uuid, existing);
+            remember(asset.key, existing);
             return existing;
         }
         ContentValues values = new ContentValues();
-        values.put("uuid", asset.uuid);
+        values.put("uuid", asset.key);
         values.put("name", asset.name);
         values.put("mime", asset.mime);
         values.put("media_type", asset.mediaType);
@@ -83,10 +83,10 @@ public final class IdStore extends SQLiteOpenHelper {
         long inserted = db.insert("ids", null, values);
         if (inserted <= 0L) {
             // Lost a race with another process; reuse the row that won.
-            inserted = findId(db, asset.uuid);
+            inserted = findId(db, asset.key);
         }
         if (inserted > 0L) {
-            remember(asset.uuid, inserted);
+            remember(asset.key, inserted);
         }
         return inserted;
     }
