@@ -46,6 +46,7 @@ build-immich.sh              builds the custom Immich APK (the orchestrator) fro
 tools/bridge-probe/          tiny APK exercising the v2 bridge (trusted + untrusted builds)
 patches/src/main/kotlin/     Morphe patch module (Kotlin)
 extension/src/main/java/     runtime injected into the APK (Java, dexed to extensions/*.mpe)
+docs/new-patches.md          adding support for another app
 ```
 
 `build.sh` needs the Morphe desktop jar, an `android.jar` and Android build-tools
@@ -83,6 +84,9 @@ The API key is never stored in this repository.
 Use a **merged** APK (splits for `base__abi` / `base__density` folded in), otherwise
 the installed build is missing its native libraries. Both manifests carry
 `requiredSplitTypes`; the patch removes it so a single APK installs.
+
+Extending the set to another app — including hosts you cannot test yourself — is a
+documented workflow: [`docs/new-patches.md`](docs/new-patches.md).
 
 ## Traps worth keeping
 
