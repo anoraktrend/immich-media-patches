@@ -175,6 +175,30 @@ Immich app (custom build)                     Discord / Tumblr (patched)
 - Degradation: if the database cannot be read (e.g. first launch before migration), serve
   the remote-only timeline and say so; logout of Immich disables the bridge naturally.
 
+### Bridge verification (2026-11-13, first working build)
+
+- The bridge skeleton + `config` endpoint are **verified on device**: provider registered,
+  permission declared, and a call returns `{protocol=1, configured=true, serverUrl=…,
+  sessionKey=…}` (token masked in every log). Read from `HomeWidgetPreferences` per call.
+- Install notes for replacing the stock app (all verified):
+  - `pm uninstall -k` is a trap — kept data remembers the old signature and the next
+    install of a differently-signed build fails `INSTALL_FAILED_UPDATE_INCOMPATIBLE`.
+    Full `pm uninstall` is required; restore the data from a tar afterwards.
+  - The stock build's versionCode (3042099) is *higher* than the v3.4.1 tag's
+    (3040199), so install with `adb install -d` (allow downgrade).
+  - The uid changes on reinstall (10243 → 10248 here): `chown -R <new-uid>` both
+    `/data/data/<pkg>` and `/data/user_de/0/<pkg>`, then `chcon -R
+    u:object_r:app_data_file:s0:c<uid-10000>,c256,c512,c768`.
+  - Data (prefs incl. the live login, `app_flutter/immich.sqlite`) survives the tar
+    round trip; the app starts normally on the restored state.
+- Caller checks observed: root and shell can call the provider on this ROM (KernelSU
+  runs `su` in its own SELinux domain; shell's uid checks are privileged). The case that
+  must be refused is a differently-signed *app* — the provider sets
+  `android:readPermission` (framework-enforced) and re-checks in `call()`. A direct
+  denial test needs the probe app (open item, Phase 3 tooling).
+- Frida 17.26.2 is back online (`frida-ps -U` lists device processes) — handy for the
+  media-endpoint work.
+
 ## Config resolution order
 
 1. In-app settings (Phase 4): server URL + token, "Test connection" hitting
@@ -189,10 +213,10 @@ Immich app (custom build)                     Discord / Tumblr (patched)
   DB, toolchain installed, fork established, and the unmodified baseline built end to end
   (arm64 release APK, 102.7 MB, debug-signed). The caveats that cost a few cycles are
   recorded under "Build from source".
-- **Phase 1 — bridge skeleton.** New Kotlin package (e.g.
-  `mobile/android/app/src/main/kotlin/app/alextran/immich/bridge/`), provider + permission
-  in the manifest, read-only provider.
-- **Phase 2 — config endpoint.** Reuse `widget/ImmichAPI.kt`; surface "not signed in".
+- **Phase 1 — bridge skeleton: done (fork commit `d786cc7e`, 2026-11-13).** Provider +
+  signature permission in the manifest, read-only; `call("config")` verified on device.
+- **Phase 2 — config endpoint: done.** `ImmichAPI.getServerConfig` read per call;
+  logged out → `configured=false`.
 - **Phase 3 — timeline and media.** `mergedAsset` SQL read-only against
   `app_flutter/immich.sqlite`; remote via the app's HTTP stack (OkHttp + coroutines
   already on the classpath); local via MediaStore (projection constants already exist in
@@ -252,8 +276,10 @@ Immich app (custom build)                     Discord / Tumblr (patched)
   `/data/data/app.alextran.immich` and `/data/user_de/0/app.alextran.immich` **before
   uninstalling** — they carry the login session
   (`shared_prefs/HomeWidgetPreferences.xml`) and the timeline DB (`app_flutter/immich.sqlite`).
-  Restore, `chown -R <uid>`, and `chcon` as in v1. Logging in again also works but
-  re-downloads the sync state.
+  A full uninstall is required (`-k` breaks differently-signed installs), `adb install -d`
+  is needed (stock versionCode is higher than the tag's), and the uid changes: restore
+  the tar, `chown -R <new-uid>`, `chcon` as in v1. Verified end to end on 2026-11-13 —
+  see "Bridge verification". Logging in again also works but re-downloads sync state.
 - **Pull the DB for local SQL iteration** (used for the evidence above):
   `app_flutter/immich.sqlite{,-wal,-shm}`; a copy lives at `/tmp/opencode/immich-db/`
   (ephemeral). Bind `:user_ids` with `(SELECT id FROM auth_user_entity)` for quick checks.
@@ -302,6 +328,9 @@ which Immich endpoints and API-key permissions a cloud-media integration needs.
   (v3.3.5 → v3.4.1 happened during v1).
 - **Keystore hygiene**: one key for Immich + consumers, stored off-repo; loss = reinstall
   cycle everywhere.
+- **Probe app (Phase 3 tooling)**: a tiny bridge client built once, signed with the
+  project key for positive tests and with a throwaway key to *prove* the denial path —
+  shell/root on this ROM are privileged, so they cannot stand in for "an unsigned app".
 - **App version pinning** (updated): upgrading = checkout new tag, re-apply the bridge
   patch, re-copy the SQL, rebuild, re-run the install dance.
 - **Gallery semantics worth knowing**: local-only rows are limited to assets in
