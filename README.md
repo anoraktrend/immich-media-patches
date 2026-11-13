@@ -11,6 +11,27 @@ Verified end to end on Android 13 (API 33), arm64:
 | `com.discord` 351.11 - Stable | Immich library | thumbnails (~13 KB/cell) | messages, full-resolution original |
 | `com.tumblr` 47.0.0.108 | Immich library | renders in composer | photo posts and messenger images |
 
+## Releases
+
+The [latest release](https://github.com/anoraktrend/immich-media-patches/releases)
+carries `patches-<version>.mpp` (Discord 351.11, Tumblr 47.0.0.108). Download it and
+patch, or point Morphe at this repository and it fetches the newest release itself:
+
+```bash
+java -jar morphe-desktop-*.jar patch \
+  -p patches-2.0.0.mpp \
+  -e "Immich photo picker" \
+  -o out/app.apk \
+  app.apk
+```
+
+By default the patched apps take their configuration from the **Immich app** on the
+device (bridge mode — build it from
+[the fork](https://github.com/anoraktrend/immich-android-bridge), branch
+`android-bridge`). To bake a server URL and API key into the APK instead, pass the
+`immichBaseUrl` / `immichApiKey` options — both are optional since v2, see
+Configuration.
+
 ## How it works
 
 Each patched app gets a private, read-only `ContentProvider`:
@@ -72,7 +93,10 @@ java -jar morphe-desktop-*.jar patch \
   app.apk
 ```
 
-The API key is never stored in this repository.
+Both options are optional since v2: leave them empty and the patched app takes its
+configuration from the Immich app on the device (bridge mode, nothing baked in); set
+them to keep a fallback for devices without it (direct mode, the v1 behaviour). The
+API key is never stored in this repository.
 
 ## Host apps
 

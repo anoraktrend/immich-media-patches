@@ -7,6 +7,7 @@ OUT="$ROOT/build"
 CACHE="${XDG_CACHE_HOME:-$HOME/.cache}/immich-media-patches"
 
 MORPHE_JAR="${MORPHE_JAR:-/home/lucy/Downloads/morphe-desktop-1.15.0-all.jar}"
+VERSION="${VERSION:-0.0.0-dev}"
 ANDROID_JAR="${ANDROID_JAR:-/opt/android-sdk/platforms/android-36/android.jar}"
 BUILD_TOOLS="${BUILD_TOOLS:-/opt/android-sdk/build-tools/37.0.0}"
 KOTLIN_VERSION="${KOTLIN_VERSION:-2.4.21}"
@@ -74,13 +75,15 @@ log "Dexing extension"
 cp "$OUT/dex/classes.dex" "$OUT/bundle/extensions/immich-media.mpe"
 cp -r "$OUT/patch-classes/." "$OUT/bundle/"
 
-cat > "$OUT/MANIFEST.MF" <<'EOF'
+cat > "$OUT/MANIFEST.MF" <<EOF
 Manifest-Version: 1.0
 Created-By: immich-media-patches
+Implementation-Title: immich-media-patches
+Implementation-Version: $VERSION
 EOF
 
 log "Packaging bundle"
 (cd "$OUT/bundle" && jar --create --file "$OUT/immich-media-patches.mpp" --manifest "$OUT/MANIFEST.MF" .)
 
-log "Built $OUT/immich-media-patches.mpp"
+log "Built $OUT/immich-media-patches.mpp (version $VERSION)"
 unzip -l "$OUT/immich-media-patches.mpp" | tail -n +4 | head -20

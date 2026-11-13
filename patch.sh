@@ -13,8 +13,8 @@ BUNDLE="$ROOT/build/immich-media-patches.mpp"
 
 [ -f "$ROOT/.env" ] && . "$ROOT/.env"
 
-: "${IMMICH_URL:?set IMMICH_URL in .env or the environment}"
-: "${IMMICH_API_KEY:?set IMMICH_API_KEY in .env or the environment}"
+# Both options are optional in v2: without them the patched app takes its
+# configuration from the Immich app on the device (bridge mode).
 
 target="${1:-}"
 input="${2:-}"
@@ -40,11 +40,14 @@ if [ -n "${KEYSTORE_PATH:-}" ] && [ -f "$KEYSTORE_PATH" ]; then
     echo "signing with: $KEYSTORE_PATH"
 fi
 
+PATCH_OPTIONS=()
+[ -n "${IMMICH_URL:-}" ] && PATCH_OPTIONS+=(-O "immichBaseUrl=$IMMICH_URL")
+[ -n "${IMMICH_API_KEY:-}" ] && PATCH_OPTIONS+=(-O "immichApiKey=$IMMICH_API_KEY")
+
 java -Djava.awt.headless=true -jar "$MORPHE_JAR" patch \
     -p "$BUNDLE" \
     -e "$patch_name" \
-    -O "immichBaseUrl=$IMMICH_URL" \
-    -O "immichApiKey=$IMMICH_API_KEY" \
+    "${PATCH_OPTIONS[@]}" \
     "${KEYSTORE_ARGS[@]}" \
     -o "$output" \
     "$input"

@@ -33,18 +33,20 @@ private const val TUMBLR_VERSIONS = "47.0.0.108"
  */
 private val immichBaseUrl = stringOption(
     key = "immichBaseUrl",
-    title = "Immich server URL",
-    description = "Base URL of the Immich server, for example https://immich.example.com",
+    title = "Immich server URL (optional)",
+    description = "Optional. Bakes the server URL into the APK for direct mode. Leave empty " +
+        "when the Immich app on the device should provide the configuration (bridge mode).",
     default = "",
-    required = true,
+    required = false,
 )
 
 private val immichApiKey = stringOption(
     key = "immichApiKey",
-    title = "Immich API key",
-    description = "API key used to browse and download assets from Immich",
+    title = "Immich API key (optional)",
+    description = "Optional. Baked together with the server URL for direct mode. Leave empty " +
+        "to rely on the Immich app bridge for credentials.",
     default = "",
-    required = true,
+    required = false,
 )
 
 // region Discord
