@@ -62,8 +62,11 @@ log "i18n keys (typed translations)"
 MISE_YES=1 mise //mobile:i18n:keys
 
 # Signing: the project keystore when configured (.env), else debug fallback.
+# Gradle gates release signing on `file("../key.jks").exists()` — i.e.
+# mobile/android/key.jks — so the keystore must exist at that exact path.
 if [ -n "${KEYSTORE_PATH:-}" ] && [ -f "$KEYSTORE_PATH" ]; then
     log "signing with $KEYSTORE_PATH"
+    ln -sf "$KEYSTORE_PATH" "$SRC/mobile/android/key.jks"
     cat > "$SRC/mobile/android/key.properties" <<EOF
 storeFile=$KEYSTORE_PATH
 keyAlias=${KEYSTORE_ALIAS:-immich-bridge}

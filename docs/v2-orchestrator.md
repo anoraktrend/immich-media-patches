@@ -244,8 +244,9 @@ Immich app (custom build)                     Discord / Tumblr (patched)
     was chowned to the build user so Gradle can install components itself.
   - `i18n:keys` must complete, or every `context.t.*` getter is missing and kernel
     compilation fails.
-  - Signing: `build-immich.sh` writes `mobile/android/key.properties` from `.env`;
-    without it the release build silently falls back to debug signing.
+  - Signing: release silently debug-signs unless `mobile/android/key.jks` exists — the
+    Gradle logic switches on that exact path. `build-immich.sh` symlinks the project
+    keystore there and writes `mobile/android/key.properties` from `.env`.
 - **Replacing the device's Immich app** (custom build keeps `applicationId
   app.alextran.immich` but has a different signer): back up
   `/data/data/app.alextran.immich` and `/data/user_de/0/app.alextran.immich` **before
