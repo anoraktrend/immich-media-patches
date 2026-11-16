@@ -82,6 +82,10 @@ these until proven otherwise:
 9. Mime sniffing: report `image/webp` for previews; sniff originals after caching.
 10. Upload queues that report success on failure — verify by the artifact landing, not by
     the worker result.
+11. Legacy `compatibleWith(package to versions)` still patches, but the Morphe GUI builds
+    its supported-apps list from the first-class `Compatibility` model (display name,
+    icon colour, targets). With the legacy form the app can be missing from the GUI even
+    though the CLI lists it — use `Compatibility` (see Step 4).
 
 If you hit a behaviour that isn't on this list, add it — that table is the most valuable
 output of this repo.
@@ -91,11 +95,19 @@ output of this repo.
 Copy a block from `Patches.kt` and adjust:
 
 ```kotlin
+private val ACME_COMPATIBILITY = Compatibility(
+    name = "Acme",
+    packageName = ACME_PACKAGE,
+    apkFileType = ApkFileType.APK_REQUIRED,   // merged APK, not a split bundle
+    appIconColor = 0x123456,
+    targets = listOf(AppTarget(version = ACME_VERSIONS, minSdk = 24)),
+)
+
 private val acmeImmichResources = resourcePatch(
     name = "Immich media provider",
     description = "Registers the Immich backed media provider inside Acme's manifest.",
 ) {
-    compatibleWith(ACME_PACKAGE to setOf(ACME_VERSIONS))
+    compatibleWith(ACME_COMPATIBILITY)
     execute { installProvider(this, "$ACME_PACKAGE.immich.media") }
 }
 
@@ -103,7 +115,7 @@ val acmeImmichMediaPatch = bytecodePatch(
     name = "Immich photo picker",
     description = "Replaces Acme's in-app gallery with a browser for an Immich server.",
 ) {
-    compatibleWith(ACME_PACKAGE to setOf(ACME_VERSIONS))
+    compatibleWith(ACME_COMPATIBILITY)
     dependsOn(acmeImmichResources)
     immichBaseUrl()
     immichApiKey()
@@ -114,8 +126,11 @@ val acmeImmichMediaPatch = bytecodePatch(
 }
 ```
 
-Pin **exact versions** with `compatibleWith` — obfuscated names move between releases, and
-an unverified version's seams are unknown territory.
+Pin **exact versions** with `compatibleWith`, and use the first-class `Compatibility`
+form above rather than the legacy `package to versions` pair: both patch identically, but
+only the former gives the Morphe GUI the display name and icon it needs to list the app.
+Obfuscated names move between releases, and an unverified version's seams are unknown
+territory.
 
 ## Step 5 — build, install, iterate
 

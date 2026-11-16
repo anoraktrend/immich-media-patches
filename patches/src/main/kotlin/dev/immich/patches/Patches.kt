@@ -1,6 +1,9 @@
 package dev.immich.patches
 
 import app.morphe.patcher.extensions.InstructionExtensions
+import app.morphe.patcher.patch.ApkFileType
+import app.morphe.patcher.patch.AppTarget
+import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.ResourcePatchContext
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
@@ -26,6 +29,27 @@ private const val DISCORD_VERSIONS = "351.11 - Stable"
 
 private const val TUMBLR_PACKAGE = "com.tumblr"
 private const val TUMBLR_VERSIONS = "47.0.0.108"
+
+/**
+ * First-class [Compatibility] declarations. The legacy `package to versions` form is
+ * still accepted by the patcher, but the Morphe GUI builds its supported-apps list from
+ * this model: a legacy entry has no display name, so the app silently fails to appear.
+ */
+private val DISCORD_COMPATIBILITY = Compatibility(
+    name = "Discord",
+    packageName = DISCORD_PACKAGE,
+    apkFileType = ApkFileType.APK_REQUIRED,
+    appIconColor = 0x5865F2,
+    targets = listOf(AppTarget(version = DISCORD_VERSIONS, minSdk = 24)),
+)
+
+private val TUMBLR_COMPATIBILITY = Compatibility(
+    name = "Tumblr",
+    packageName = TUMBLR_PACKAGE,
+    apkFileType = ApkFileType.APK_REQUIRED,
+    appIconColor = 0x36465D,
+    targets = listOf(AppTarget(version = TUMBLR_VERSIONS, minSdk = 26)),
+)
 
 /**
  * Server configuration. Declared once so both the manifest patch and the bytecode patch
@@ -55,7 +79,7 @@ private val discordImmichResources = resourcePatch(
     name = "Immich media provider",
     description = "Registers the Immich backed media provider inside Discord's manifest.",
 ) {
-    compatibleWith(DISCORD_PACKAGE to setOf(DISCORD_VERSIONS))
+    compatibleWith(DISCORD_COMPATIBILITY)
 
     execute {
         installProvider(this, "$DISCORD_PACKAGE.immich.media")
@@ -66,7 +90,7 @@ val discordImmichMediaPatch = bytecodePatch(
     name = "Immich photo picker",
     description = "Replaces Discord's in-app gallery with a browser for an Immich server.",
 ) {
-    compatibleWith(DISCORD_PACKAGE to setOf(DISCORD_VERSIONS))
+    compatibleWith(DISCORD_COMPATIBILITY)
     dependsOn(discordImmichResources)
     immichBaseUrl()
     immichApiKey()
@@ -122,7 +146,7 @@ private val tumblrImmichResources = resourcePatch(
     name = "Immich media provider",
     description = "Registers the Immich backed media provider inside Tumblr's manifest.",
 ) {
-    compatibleWith(TUMBLR_PACKAGE to setOf(TUMBLR_VERSIONS))
+    compatibleWith(TUMBLR_COMPATIBILITY)
 
     execute {
         installProvider(this, "$TUMBLR_PACKAGE.immich.media")
@@ -133,7 +157,7 @@ val tumblrImmichMediaPatch = bytecodePatch(
     name = "Immich photo picker",
     description = "Replaces Tumblr's in-app gallery with a browser for an Immich server.",
 ) {
-    compatibleWith(TUMBLR_PACKAGE to setOf(TUMBLR_VERSIONS))
+    compatibleWith(TUMBLR_COMPATIBILITY)
     dependsOn(tumblrImmichResources)
     immichBaseUrl()
     immichApiKey()
