@@ -5,6 +5,7 @@ import app.morphe.patcher.patch.ApkFileType
 import app.morphe.patcher.patch.AppTarget
 import app.morphe.patcher.patch.Compatibility
 import app.morphe.patcher.patch.ResourcePatchContext
+import app.morphe.patcher.patch.SupportedAbi
 import app.morphe.patcher.patch.bytecodePatch
 import app.morphe.patcher.patch.resourcePatch
 import app.morphe.patcher.patch.stringOption
@@ -38,17 +39,35 @@ private const val TUMBLR_VERSIONS = "47.0.0.108"
 private val DISCORD_COMPATIBILITY = Compatibility(
     name = "Discord",
     packageName = DISCORD_PACKAGE,
-    apkFileType = ApkFileType.APK_REQUIRED,
+    // Venus Patches is the Discord base and declares the original APKM, so match it
+    // exactly; an APK-only claim would not combine with Venus on the stock bundle.
+    apkFileType = ApkFileType.APKM,
     appIconColor = 0x5865F2,
-    targets = listOf(AppTarget(version = DISCORD_VERSIONS, minSdk = 24)),
+    targets = listOf(
+        AppTarget(version = DISCORD_VERSIONS, versionCode = 351011, minSdk = 26),
+    ),
 )
 
 private val TUMBLR_COMPATIBILITY = Compatibility(
     name = "Tumblr",
     packageName = TUMBLR_PACKAGE,
-    apkFileType = ApkFileType.APK_REQUIRED,
-    appIconColor = 0x36465D,
-    targets = listOf(AppTarget(version = TUMBLR_VERSIONS, minSdk = 26)),
+    // HushTumblr is the Tumblr base and works from the original APKM; mirror its claim
+    // (including the genuine Tumblr signer) so both bundles combine on the stock file.
+    apkFileType = ApkFileType.APKM,
+    appIconColor = 0x001935,
+    signatures = setOf("39ac9c821ad2d605e4849f066e8aad3cca27d5e13eb03ad8755be234a2985dfd"),
+    targets = listOf(
+        AppTarget(
+            version = TUMBLR_VERSIONS,
+            versionCodes = mapOf(
+                SupportedAbi.ARM64_V8A to 1470000108,
+                SupportedAbi.ARMEABI_V7A to 1470000108,
+                SupportedAbi.X86 to 1470000108,
+                SupportedAbi.X86_64 to 1470000108,
+            ),
+            minSdk = 26,
+        ),
+    ),
 )
 
 /**

@@ -4,7 +4,8 @@ Morphe patches that make an app's built-in photo picker browse an
 [Immich](https://immich.app) server instead of local `MediaStore` content. Nothing is
 synced to the device: the picker lists the Immich timeline and uploads the originals.
 
-Verified end to end on Android 13 (API 33), arm64:
+Verified end to end on Android 13 and Android 16 (arm64), including the recommended
+base flow (original APKM + the host's community patch set + these patches):
 
 | App | Picker | Preview | Send |
 | --- | --- | --- | --- |
@@ -22,8 +23,33 @@ java -jar morphe-desktop-*.jar patch \
   -p patches-<version>.mpp \
   -e "Immich photo picker" \
   -o out/app.apk \
-  app.apk
+  app.apkm
 ```
+
+### Base patch sets
+
+The verified hosts are normally patched on top of their community base sets, from the
+**original APKM** in one Morphe run:
+
+| Host | Base | Bundle |
+| --- | --- | --- |
+| Discord 351.11 - Stable | [Venus Patches](https://github.com/VenusIsJaded/Venus-Patches) 1.21.1 | `patches-1.21.1.mpp` |
+| Tumblr 47.0.0.108 | [HushTumblr](https://github.com/SysAdminDoc/HushTumblr) 0.0.11 | `patches-0.0.11.mpp` |
+
+Our compatibility entries mirror those bases (`APKM`, the bundle version code, and
+Tumblr's genuine signer), so Morphe accepts the same stock bundle for both patch sets.
+Select the base's default patches plus **Immich photo picker**:
+
+```bash
+java -jar morphe-desktop-2.2.0-all.jar patch \
+  -p patches-1.21.1.mpp \
+  -p patches-<version>.mpp -e "Immich photo picker" \
+  -o out/discord.apk \
+  discord-351.11.apkm
+```
+
+HushTumblr 0.0.11 needs Morphe 2.2.0 or newer (its patches use the newer patcher API);
+these patches on their own still load on Morphe 1.15.0.
 
 By default the patched apps take their configuration from the **Immich app** on the
 device (bridge mode — build it from
@@ -56,8 +82,10 @@ Two behaviours matter beyond plain streaming:
   original into `cache/immich/staged/<uuid>-<filename>` and return that real path.
   Staged files older than six hours are swept at provider start.
 
-Everything is baked in at patch time: the server URL and API key are written into the
-patched `AndroidManifest.xml` as `<meta-data>` and read back by the provider.
+In **direct** mode the server URL and API key are baked in at patch time: they are
+written into the patched `AndroidManifest.xml` as `<meta-data>` and read back by the
+provider. In **bridge** mode (the default) nothing is baked in; the Immich app supplies
+the server and session at runtime.
 
 ## Layout
 
@@ -105,9 +133,11 @@ API key is never stored in this repository.
 | `com.discord` 351.11 | `ContentResolverMedia$Companion.queryMedia` (collection URI), `MediaResolver.resolveToUri$media_release` (preview URI → original before upload), provider + split requirement removal |
 | `com.tumblr` 47.0.0.108 | `PostGalleryFragment.A5()` (collection URI), `plc.j` / `plc$a.g` (grid thumbnails), `plc.o` / `v6` (`File.exists()` row filter), `GalleryMedia.<init>` and `.d()`, `ImageData$a.b(J)` (post payload URI), `BitmapFactory.decodeFile` across `com/tumblr/**`, provider + split requirement removal |
 
-Use a **merged** APK (splits for `base__abi` / `base__density` folded in), otherwise
-the installed build is missing its native libraries. Both manifests carry
-`requiredSplitTypes`; the patch removes it so a single APK installs.
+Use the **original APKM** (the same bundle the base patch set targets); Morphe merges
+the splits while patching. If you assemble a merged APK yourself, it works too, but the
+declared compatibility is the stock bundle — the supported input is the APKM. Both
+host manifests carry `requiredSplitTypes`; the patch removes it so the merged output
+installs as one APK.
 
 Extending the set to another app — including hosts you cannot test yourself — is a
 documented workflow: [`docs/new-patches.md`](docs/new-patches.md).
@@ -146,7 +176,8 @@ packages that matter. That trace is what isolated every trap above.
   Immich backend is reachable. Listing pages are cached for two minutes.
 * Thumbnails and originals are cached under the app's `cache/immich/` directory.
 * Downloads happen off the main thread even when the caller is a UI component.
-* No release/publishing setup: this builds locally only.
+* Releases are cut from `build/immich-media-patches.mpp` (`VERSION=x.y.z ./build.sh`)
+  and published as `patches-<version>.mpp`; Morphe can fetch them from this repository.
 
 ## Next version
 

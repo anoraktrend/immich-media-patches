@@ -132,10 +132,18 @@ only the former gives the Morphe GUI the display name and icon it needs to list 
 Obfuscated names move between releases, and an unverified version's seams are unknown
 territory.
 
+If the host already has an established base patch set (Venus Patches for Discord,
+HushTumblr for Tumblr), mirror its `Compatibility` claim — package, `apkFileType`,
+version code, `minSdk`, and any signer hashes — so both bundles accept the same stock
+bundle. The base's release README names the exact APKM it was built against.
+
 ## Step 5 — build, install, iterate
 
-- Use a **merged** APK (splits folded in) or the installed build lacks its native
-  libraries; `installProvider` strips `requiredSplitTypes` so a single APK installs.
+- Start from the **original APKM** the base patch set targets; Morphe merges the splits
+  (native libraries included). A merged APK also works if you assemble it, but declare
+  the input you actually support — `ApkFileType.APKM` for the stock bundle, or
+  `APK_REQUIRED` for a plain merged APK. `installProvider` strips `requiredSplitTypes`
+  so the output installs as one APK.
 - Sign with your own keystore. To use the **bridge** (auto-config from your Immich app)
   the key must match the one your custom Immich build is signed with — the bridge
   permission is `signature` level. Without that, build the patch with baked
